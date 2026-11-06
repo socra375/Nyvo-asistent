@@ -1,0 +1,30 @@
+name: Nyvo · trabajos en segundo plano
+# Red de seguridad de la cola de trabajos: cada 10 minutos procesa lo pendiente
+# (por ejemplo, un trabajo que quedó a medias porque Vercel cortó la petición a los 60 s).
+# Corre en GitHub porque el plan gratuito de Vercel solo permite un cron al día.
+# Requiere el secreto CRON_SECRET (mismo valor que en Vercel) y la variable NYVO_URL (p. ej. https://nyvo-ainova.vercel.app).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Procesar trabajos pendientes
+        env:
+          SECRET: ${{ secrets.CRON_SECRET }}
+          URL: ${{ vars.NYVO_URL }}
+        run: |
+          [ -n "$SECRET" ] || { echo "::warning::Falta el secreto CRON_SECRET en GitHub (Settings > Secrets and variables > Actions). Se omite."; exit 0; }
+          [ -n "$URL" ] || { echo "::warning::Falta la variable NYVO_URL en GitHub. Se omite."; exit 0; }
+          code=$(curl -sS --max-time 70 -o out.json -w '%{http_code}' -H "Authorization: Bearer $SECRET" "$URL/api/jobs/tick") || { echo "::error::No se pudo conectar con $URL"; exit 1; }
+          case "$code" in
+            200) cat out.json ;;
+            401) echo "::error::CRON_SECRET de GitHub no coincide con el de Vercel"; exit 1 ;;
+            404) echo "::error::Falta CRON_SECRET en Vercel (o falta redesplegar)"; exit 1 ;;
+            *) echo "::error::Respuesta inesperada ($code)"; cat out.json; exit 1 ;;
+          esac

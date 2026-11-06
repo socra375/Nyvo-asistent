@@ -1,0 +1,37 @@
+# Conectores de Nyvo
+
+Cada integración vive en `connectors/<id>/` y exporta un `Connector` (`connectors/types.ts`):
+
+| Campo | Para qué |
+|---|---|
+| `id`, `title`, `description` | Identidad y texto de la interfaz |
+| `role` | Especialista que lo usa: `negocios`, `documentos`, `navegador`, `habilidades` o `nucleo` |
+| `guide` | Cuándo usarlo (va en las instrucciones del especialista) |
+| `requiredEnv` / `envFor` | Variables necesarias. Si falta alguna → estado **falta configurar** (nunca un error) |
+| `google.scopes` | Permisos de Google que pide **solo** este conector, al conectarlo |
+| `defaultSettings` | Ajustes del usuario (p. ej. `autoGuardar` en Notion) |
+| `tools(ctx)` | Herramientas: `name`, `description`, `parameters`, `mutates`, `run`, opcional `autoApprove`, `summarize`, `undoInfo` |
+| `undo(info)` | Deshacer una acción hecha automáticamente |
+
+`connectors/registry.ts` calcula el estado de cada conector (`listo`, `falta_configurar`, `falta_conectar`, `desactivado`) y arma las herramientas de cada especialista **solo con lo que está listo**. Una herramienta con `mutates: true` nunca se ejecuta directamente: crea una tarjeta de confirmación.
+
+## Lista (fase 1)
+
+| Conector | Especialista | Variables | Herramientas | Escribe fuera |
+|---|---|---|---|---|
+| `ainova` · AINova System | Negocios | `AINOVA_MCP_URL`, `AINOVA_MCP_TOKEN` | Las del MCP de AINova, leídas en vivo: `get_summary`, `search_clients`, `list_projects`, `list_payments`, `list_services`, `list_conversations`, `read_conversation`, `list_agents`, `get_agent` (lectura); `add_interaction`, `mark_payment_paid`, `reply_to_client`, `escalate_to_owner` (escritura → tarjeta). `add_agent_item` está oculta | Sí, con tarjeta. La lectura/escritura sale de la anotación MCP `readOnlyHint` (sin ella = escritura) |
+| `notion` · Notion | Documentos | `NOTION_TOKEN`, `NOTION_ROOT_PAGE_ID` | `guardar_nota`, `crear_reporte` (automáticas dentro de «Nyvo», con Deshacer; con `autoGuardar` apagado piden tarjeta), `anexar_a_pagina` (tarjeta), `buscar`, `leer_pagina` | Sí |
+| `google-drive` · Google Drive | Documentos | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NYVO_ENC_KEY` + permiso `drive.metadata.readonly` | `archivos_principales`, `buscar_archivos` | No (solo metadatos) |
+| `memoria` · Memoria | Todos | `DATABASE_URL` | `recordar`, `buscar_memoria` | No (base propia) |
+| `gemini` · Gemini | Núcleo | `GEMINI_API_KEY`, `GEMINI_MODEL` | — (motor del agente y transcripción) | — |
+| `voz` · Voz | Núcleo | Gemini: `GEMINI_API_KEY`, `GEMINI_TTS_MODEL`, `GEMINI_TTS_VOICE` · ElevenLabs (`VOICE_PROVIDER=elevenlabs`): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | — (`/api/voice/tts`, `/api/voice/stt`) | — |
+
+Variables del núcleo (no de un conector): `DATABASE_URL`, `NYVO_OWNER_EMAIL`, `NYVO_ENC_KEY`, `APP_URL`, `CRON_SECRET`. Detalle y comentarios en [`.env.example`](../.env.example).
+
+## Añadir un conector
+
+1. Crea `connectors/<id>/index.ts` exportando un `Connector`.
+2. Súmalo a `CONNECTORS` en `connectors/registry.ts`.
+3. Marca `mutates: true` en toda herramienta que cambie datos externos. Solo usa `autoApprove` si el dueño lo aprobó expresamente y existe `undoInfo` + `undo`.
+4. Trata todo lo que devuelva el servicio como **dato no confiable** (las reglas del especialista ya lo indican al modelo).
+5. Añade su imitación a `tests/fakes/upstream.ts` y pruebas en `tests/unit` y `tests/e2e`.

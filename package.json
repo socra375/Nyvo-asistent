@@ -1,0 +1,45 @@
+{
+  "name": "nyvo-asistent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nyvo: segundo director de AINova System, asistente de IA para «Mis negocios».",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --import tsx server/dev.ts",
+    "dev:web": "vite",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
+    "vercel-build": "npm run build && node --import tsx server/db/migrate.ts --if-configured",
+    "lint": "eslint .",
+    "test": "node --import tsx --test --test-concurrency=1 \"tests/unit/**/*.test.ts\"",
+    "e2e": "playwright test --trace off",
+    "migrate": "node --import tsx server/db/migrate.ts",
+    "owner:password": "node --import tsx server/cli/set-password.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@vercel/functions": "^3.1.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.38.0",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.18.12",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "eslint": "^9.38.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^16.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^7.3.7",
+    "zod": "^4.6.7"
+  }
+}
