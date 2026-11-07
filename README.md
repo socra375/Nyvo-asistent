@@ -74,7 +74,7 @@ El usuario de `TEST_DATABASE_URL` debe poder crear bases de datos (crea `nyvo_e2
 ### 2. Neon (base de datos propia de Nyvo)
 1. En Vercel → **Storage** → Neon (la integración ya está instalada en el equipo, plan gratuito) → **Create database** «nyvo» y conéctala al proyecto `nyvo-ainova`. Vercel inyecta `DATABASE_URL` en las variables.
    Si no usas la integración de Vercel: crea un proyecto **nuevo** en Neon y copia la cadena de conexión *pooled* en `DATABASE_URL`. No reutilices la base de AINova: Nyvo nunca la toca.
-3. Las migraciones se aplican solas en cada despliegue (`npm run vercel-build`). Para aplicarlas a mano: `npm run migrate`.
+3. Las migraciones se aplican solas en cada despliegue **de producción** (`npm run vercel-build`). Las vistas previas de los PR **no migran**: comparten la base de producción, y una migración sin revisar la tocaría antes de fusionar. Para aplicarlas a mano: `npm run migrate`.
 
 ### 3. Vercel
 **Ya creado:** proyecto `nyvo-ainova` en el equipo Architec WebS, con la URL `https://nyvo-ainova.vercel.app`, Node 22.x, y las variables `NYVO_OWNER_EMAIL`, `AINOVA_API_URL`, `APP_URL`, `NYVO_ENC_KEY` y `CRON_SECRET`. Faltan `AINOVA_API_KEY` y las demás de [`.env.example`](.env.example) a medida que haces los pasos siguientes.
