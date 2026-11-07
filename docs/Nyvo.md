@@ -69,7 +69,7 @@
 | Protección de Vercel | «Vercel Authentication» solo en previsualizaciones. En producción estaba activa y habría bloqueado el retorno de Google y el disparador de GitHub Actions. Nyvo ya tiene su propio acceso (lista de correos) |
 | Variables en producción | `NYVO_OWNER_EMAIL`, `AINOVA_MCP_URL`, `APP_URL`, `NYVO_ENC_KEY` (secreta), `CRON_SECRET` (visible solo desde el panel de Vercel) |
 | Despliegue de comprobación | Rama de trabajo desplegada y en estado READY. `/api/health` responde, la web carga y `/api/session` dice «Falta configurar DATABASE_URL» en vez de romperse |
-| **Neon** | **No creado.** El MCP de Neon rechaza crear proyectos porque la organización la gestiona Vercel. Hay que crearlo desde la integración de Vercel (ver «Pendiente») |
+| **Neon** · proyecto `Nyvo-BD` (creado el 7 nov 2026 desde la integración de Vercel) | Creado por el dueño (el MCP de Neon no puede crear proyectos en una organización gestionada por Vercel). Vercel inyectó `DATABASE_URL` en producción y previsualización. El build de producción aplicó la migración `001_base.sql`: están las 13 tablas de Nyvo más `schema_migrations`. La integración añadió además un esquema `neon_auth` que Nyvo no usa |
 | **Google Cloud** | **No creado.** Sin sesión de `gcloud` en la sesión de desarrollo, y la pantalla de consentimiento y el cliente OAuth web no se pueden crear por API |
 | **Notion** | **No creado.** El conector de la sesión de desarrollo apunta a otra cuenta (`marcosjimenezpolanco323@gmail.com`), no a la de la empresa, así que no se escribió nada ahí |
 
@@ -123,7 +123,9 @@ En esta sesión, en local, con Postgres 16 real:
 ## Pendiente
 
 **Para dejar Nyvo funcionando (lo hace el dueño; los pasos detallados están en el README):**
-1. **Base de datos:** en Vercel → Storage → Neon (la integración ya está instalada) → crear base de datos «nyvo» y conectarla al proyecto `nyvo-ainova`. Vercel inyecta `DATABASE_URL` solo.
+1. ~~**Base de datos**~~ **Hecho:** `Nyvo-BD` en Neon, conectada a `nyvo-ainova`, con las migraciones aplicadas.
+   - **Para entrar antes de configurar Google** hay que definir la contraseña del dueño: copia la cadena de conexión *unpooled* de Neon (o `DATABASE_URL` desde el panel de Neon) y ejecuta en tu equipo `DATABASE_URL=... NYVO_OWNER_EMAIL=ianovasystem3@gmail.com npm run owner:password`. La contraseña se escribe en la terminal y se guarda con hash.
+   - Sin eso y sin Google, `/api/session` responde pero nadie puede iniciar sesión.
 2. **Google Cloud:** crear el cliente OAuth y poner `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en Vercel.
 3. **Notion:** crear la integración con la cuenta de la empresa, la página «Nyvo», y poner `NOTION_TOKEN` y `NOTION_ROOT_PAGE_ID` en Vercel.
 4. **Gemini:** poner `GEMINI_API_KEY` y elegir `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE`.
