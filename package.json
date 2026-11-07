@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "node --import tsx server/dev.ts",
     "dev:web": "vite",
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
+    "build:brain": "node --import tsx scripts/build-brain.ts",
+    "build": "npm run build:brain && tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
     "vercel-build": "npm run build && node --import tsx server/db/migrate.ts --if-configured --production-only",
     "lint": "eslint .",
     "test": "node --import tsx --test --test-concurrency=1 \"tests/unit/**/*.test.ts\"",

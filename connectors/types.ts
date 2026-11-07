@@ -23,7 +23,7 @@ export interface Tool {
    * Excepción aprobada por el usuario: algunas escrituras de bajo riesgo se hacen solas
    * y muestran después una tarjeta «Deshacer». Solo si la función devuelve true.
    */
-  autoApprove?: (ctx: ToolContext) => boolean;
+  autoApprove?: (ctx: ToolContext, args: Record<string, unknown>) => boolean;
   /** Resumen legible para la tarjeta de confirmación. */
   summarize?: (args: Record<string, unknown>) => string;
   run: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;

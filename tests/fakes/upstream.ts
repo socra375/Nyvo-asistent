@@ -245,7 +245,7 @@ export function fakeGemini(b: Record<string, unknown>): unknown {
   const gen = b.generationConfig as { responseModalities?: string[] } | undefined;
   const turns = (b.contents ?? []) as GTurn[];
   if (gen?.responseModalities?.includes('AUDIO')) {
-    return { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.alloc(4800).toString('base64') } }] } }] };
+    return { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.alloc(72000).toString('base64') } }] } }] };
   }
   if (turns.some(t => t.parts.some(p => p.inlineData))) return say('muéstrame mis clientes');
 

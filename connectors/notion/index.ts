@@ -84,6 +84,19 @@ async function createIn(ctx: ToolContext, section: Section, title: string, conte
 }
 
 const autoSave = (ctx: ToolContext) => ctx.settings.autoGuardar !== false;
+
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/;
+// Teléfonos con formato real: internacional (+1 809 555 1234), agrupado (809-555-1234, (809) 555-1234) o 10 dígitos seguidos.
+// Una fecha (2026-11-07) o una cifra (1250000.00) no encajan.
+const PHONE = /\+\d[\d\s().-]{7,}\d|\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b|(?<!\d)\d{10}(?!\d)/;
+/**
+ * ¿El texto parece incluir datos personales (correo o teléfono)? Si es así la nota NO se guarda sola: pide tarjeta.
+ * Es una red de seguridad del código, además de la marca `datos_personales` que el modelo debe poner.
+ */
+export const looksLikePersonalData = (text: string): boolean => EMAIL.test(text) || PHONE.test(text);
+/** Guardado automático solo si el ajuste está activo Y la nota no lleva datos personales. */
+const autoSaveIfSafe = (ctx: ToolContext, a: Record<string, unknown>): boolean =>
+  autoSave(ctx) && a.datos_personales !== true && !looksLikePersonalData(JSON.stringify([a.titulo, a.contenido, a.secciones]));
 const reqStr = (a: Record<string, unknown>, k: string, max: number) => {
   const v = a[k];
   if (typeof v !== 'string' || !v.trim()) throw new Error(`Falta «${k}».`);
@@ -105,10 +118,11 @@ const tools: Tool[] = [
     description: 'Guarda en Notion (Nyvo › Notas) algo que el usuario cuenta o pide recordar. Úsalo cuando el usuario diga «anota», «guarda», «recuerda» o cuente un dato del negocio.',
     parameters: { type: 'object', properties: {
       titulo: { type: 'string', description: 'Título corto (máx. 120).' },
-      contenido: { type: 'string', description: 'Texto de la nota. Admite líneas «# título» y «- punto».' }
+      contenido: { type: 'string', description: 'Texto de la nota. Admite líneas «# título» y «- punto».' },
+      datos_personales: { type: 'boolean', description: 'true si incluye nombre, teléfono o correo de un cliente: pide confirmación antes de guardar.' }
     }, required: ['titulo', 'contenido'] },
     mutates: true,
-    autoApprove: autoSave,
+    autoApprove: autoSaveIfSafe,
     summarize: a => `Guardar nota en Notion: «${String(a.titulo ?? '')}»`,
     run: (a, ctx) => createIn(ctx, 'notas', reqStr(a, 'titulo', 120), reqStr(a, 'contenido', 20000)),
     undoInfo: r => ({ pageId: (r as { pageId: string }).pageId })
@@ -120,10 +134,11 @@ const tools: Tool[] = [
       titulo: { type: 'string' },
       secciones: { type: 'array', items: { type: 'object', properties: {
         encabezado: { type: 'string' }, cuerpo: { type: 'string' }
-      }, required: ['encabezado', 'cuerpo'] } }
+      }, required: ['encabezado', 'cuerpo'] } },
+      datos_personales: { type: 'boolean', description: 'true si incluye nombre, teléfono o correo de un cliente: pide confirmación antes de guardar.' }
     }, required: ['titulo', 'secciones'] },
     mutates: true,
-    autoApprove: autoSave,
+    autoApprove: autoSaveIfSafe,
     summarize: a => `Crear reporte en Notion: «${String(a.titulo ?? '')}»`,
     run: (a, ctx) => {
       const secs = Array.isArray(a.secciones) ? a.secciones as { encabezado?: string; cuerpo?: string }[] : [];

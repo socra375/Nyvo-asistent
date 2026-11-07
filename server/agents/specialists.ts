@@ -5,6 +5,7 @@ import { toolsForRole, type BoundTool } from '../../connectors/registry.js';
 import { createConfirmCard, createUndoCard, type Card } from '../actions/actions.js';
 import { relevantNotes } from '../memory/memory.js';
 import { audit } from '../audit.js';
+import { hemisphereFor, type OnEvent } from './events.js';
 
 export type SpecialistId = 'negocios' | 'documentos' | 'navegador' | 'habilidades';
 
@@ -41,7 +42,7 @@ const clip = (v: unknown) => {
  * Ejecuta un especialista. Solo recibe la TAREA (no la conversación), con plazo y tope de llamadas.
  * Si se agota el plazo o el tope, devuelve un resultado parcial.
  */
-export async function runSpecialist(deps: Deps, p: { userId: string; conversationId: string | null; specialist: SpecialistId; task: string; deadlineMs?: number; maxCalls?: number }): Promise<SpecialistResult> {
+export async function runSpecialist(deps: Deps, p: { userId: string; conversationId: string | null; specialist: SpecialistId; task: string; deadlineMs?: number; maxCalls?: number; onEvent?: OnEvent }): Promise<SpecialistResult> {
   const spec = SPECIALISTS[p.specialist];
   const cards: Card[] = [];
   if (spec.availableFrom) {
@@ -88,7 +89,10 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
         else {
           calls++;
           try {
-            response = await execute(deps, p, bound, call.args, cards);
+            const id = hemisphereFor(bound.connectorId, bound.tool.name);
+            p.onEvent?.({ tipo: 'hemisferio', id, estado: 'activo', herramienta: bound.tool.name });
+            try { response = await execute(deps, p, bound, call.args, cards); }
+            finally { p.onEvent?.({ tipo: 'hemisferio', id, estado: 'listo', herramienta: bound.tool.name }); }
           } catch (e) {
             response = { error: e instanceof Error ? e.message : String(e) };
           }
@@ -112,7 +116,7 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
 async function execute(deps: Deps, p: { userId: string; conversationId: string | null }, b: BoundTool, args: Record<string, unknown>, cards: Card[]): Promise<Record<string, unknown>> {
   const t = b.tool;
   const summary = t.summarize?.(args) ?? `${b.connectorId} · ${t.name}`;
-  if (t.mutates && !(t.autoApprove?.(b.ctx) ?? false)) {
+  if (t.mutates && !(t.autoApprove?.(b.ctx, args) ?? false)) {
     const card = await createConfirmCard(deps, { userId: p.userId, conversationId: p.conversationId, connectorId: b.connectorId, tool: t.name, args, summary });
     cards.push(card);
     return { estado: 'pendiente_de_confirmacion', tarjeta: card.id, mensaje: 'Se mostró una tarjeta al usuario. La acción NO se ha hecho todavía.' };
