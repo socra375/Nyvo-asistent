@@ -7,6 +7,7 @@
  * - /google/...         → OAuth de Google (auth + token) y Drive v3 (files.list)
  * - /gemini/v1beta/models/:m:generateContent → Gemini (agente guionizado, TTS y transcripción)
  * - /eleven/v1/text-to-speech/:voice → ElevenLabs
+ * - /speechify/v1/audio/speech → Speechify (según el formato supuesto en server/voice/tts.ts; no verificado con la API real)
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -322,6 +323,12 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
         return res.end(Buffer.from([0xff, 0xfb, 0x90, 0x00]));
       }
+      if (url.pathname === '/speechify/v1/audio/speech') {
+        if (req.headers.authorization !== 'Bearer speechify-falso') return send(res, 401, {});
+        const b = JSON.parse(await body(req)) as { input?: string; voice_id?: string; audio_format?: string; model?: string };
+        if (!b.input || !b.voice_id || b.audio_format !== 'mp3' || !b.model) return send(res, 400, { error: 'cuerpo incompleto' });
+        return send(res, 200, { audio_data: Buffer.from([0xff, 0xfb, 0x90, 0x00]).toString('base64'), audio_format: 'mp3', billable_characters_count: b.input.length });
+      }
       send(res, 404, { error: 'ruta falsa desconocida' });
     } catch (e) {
       if (!res.headersSent) send(res, 500, { error: String(e) });
@@ -340,7 +347,7 @@ export function upstreamEnv(url: string, state: FakeState): Record<string, strin
     GOOGLE_CLIENT_ID: FAKE_GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: 'secreto-falso',
     GOOGLE_AUTH_URL: `${url}/google/auth`, GOOGLE_TOKEN_URL: `${url}/google/token`, GOOGLE_DRIVE_API_URL: `${url}/google`,
     GEMINI_API_KEY: 'gemini-falso', GEMINI_MODEL: 'modelo-falso', GEMINI_TTS_MODEL: 'tts-falso', GEMINI_TTS_VOICE: 'VozFalsa', GEMINI_API_URL: `${url}/gemini`,
-    ELEVENLABS_API_URL: `${url}/eleven`
+    ELEVENLABS_API_URL: `${url}/eleven`, SPEECHIFY_API_URL: `${url}/speechify`
   };
 }
 

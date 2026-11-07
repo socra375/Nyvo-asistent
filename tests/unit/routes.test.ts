@@ -155,6 +155,13 @@ describe('API HTTP', needsDb, () => {
     const eleven = makeDeps(db, { ...env, VOICE_PROVIDER: 'elevenlabs', ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE_ID: 'v' });
     const e = await call(eleven, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } });
     assert.equal(e.headers['content-type'], 'audio/mpeg');
+    const speechify = makeDeps(db, { ...env, VOICE_PROVIDER: 'speechify', SPEECHIFY_API_KEY: 'speechify-falso', SPEECHIFY_VOICE_ID: 'voz-1' });
+    const sp = await call(speechify, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola, soy Nyvo.' } });
+    assert.equal(sp.status, 200);
+    assert.equal(sp.headers['content-type'], 'audio/mpeg');
+    assert.deepEqual([...sp.raw], [0xff, 0xfb, 0x90, 0x00], 'se decodifica el audio base64');
+    const spBad = makeDeps(db, { ...env, VOICE_PROVIDER: 'speechify', SPEECHIFY_API_KEY: 'clave-mala', SPEECHIFY_VOICE_ID: 'voz-1' });
+    assert.equal((await call(spBad, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 502, 'clave rechazada → error de pasarela, sin filtrar la clave');
     const noVoice = makeDeps(db, { ...env, GEMINI_TTS_VOICE: '' });
     assert.equal((await call(noVoice, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 503);
     const stt = await call(deps, 'POST', '/api/voice/stt', { cookie, body: { audio: Buffer.from('audio').toString('base64'), mimeType: 'audio/webm;codecs=opus' } });

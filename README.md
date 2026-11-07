@@ -117,7 +117,7 @@ curl -i https://ainova-system.vercel.app/api/v1/tools
 ### 7. Gemini y voz
 1. Crea una clave en Google AI Studio → `GEMINI_API_KEY`.
 2. Elige `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE` **según la documentación oficial vigente** (no se fijan por defecto: ver `docs/Nyvo.md`).
-3. Alternativa de voz: `VOICE_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`.
+3. Alternativas de voz (solo la síntesis; la transcripción siempre es con Gemini): `VOICE_PROVIDER=speechify` + `SPEECHIFY_API_KEY` + `SPEECHIFY_VOICE_ID` (opcional `SPEECHIFY_MODEL`; por defecto `simba-multilingual`), o `VOICE_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`. La integración con Speechify sigue el formato de su API según se conoce y **no está verificada contra la API real** (ver `docs/Nyvo.md`).
 
 ### 8. Trabajos en segundo plano
 1. `CRON_SECRET` ya está en Vercel (Settings → Environment Variables → CRON_SECRET → mostrar). Copia **el mismo valor** a GitHub (Settings → Secrets and variables → Actions → New repository secret).

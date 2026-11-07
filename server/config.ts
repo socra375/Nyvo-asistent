@@ -19,6 +19,7 @@ export interface Config {
     googleToken: string;
     googleDrive: string;
     elevenlabs: string;
+    speechify: string;
   };
   limits: {
     ttsMaxChars: number;
@@ -49,7 +50,8 @@ export function loadConfig(env: Env = process.env): Config {
       googleAuth: env.GOOGLE_AUTH_URL ?? 'https://accounts.google.com/o/oauth2/v2/auth',
       googleToken: env.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token',
       googleDrive: env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com',
-      elevenlabs: env.ELEVENLABS_API_URL ?? 'https://api.elevenlabs.io'
+      elevenlabs: env.ELEVENLABS_API_URL ?? 'https://api.elevenlabs.io',
+      speechify: env.SPEECHIFY_API_URL ?? 'https://api.sws.speechify.com'
     },
     limits: {
       ttsMaxChars: int(env.TTS_MAX_CHARS, 1500),

@@ -3,13 +3,19 @@ import { missingEnv } from '../config.js';
 import { geminiGenerate } from '../llm/gemini.js';
 import { HttpError } from '../http/http.js';
 
-export type VoiceProvider = 'gemini' | 'elevenlabs';
+export type VoiceProvider = 'gemini' | 'elevenlabs' | 'speechify';
 export const VOICE_ENV: Record<VoiceProvider, readonly string[]> = {
   gemini: ['GEMINI_API_KEY', 'GEMINI_TTS_MODEL', 'GEMINI_TTS_VOICE'],
-  elevenlabs: ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
+  elevenlabs: ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'],
+  speechify: ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID']
 };
 
-export const voiceProvider = (cfg: Config): VoiceProvider => (cfg.env.VOICE_PROVIDER === 'elevenlabs' ? 'elevenlabs' : 'gemini');
+export const voiceProvider = (cfg: Config): VoiceProvider => providerFrom(cfg.env.VOICE_PROVIDER);
+/** Proveedor de voz según VOICE_PROVIDER; cualquier otro valor (o ninguno) es Gemini. */
+export function providerFrom(v: string | undefined): VoiceProvider {
+  const p = v?.trim().toLowerCase();
+  return p === 'elevenlabs' || p === 'speechify' ? p : 'gemini';
+}
 export const voiceMissing = (cfg: Config) => missingEnv(cfg.env, VOICE_ENV[voiceProvider(cfg)]);
 
 /** Indicaciones de estilo para Gemini TTS (el estilo se dirige con texto). */
@@ -53,6 +59,21 @@ export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: 
     });
     if (!r.ok) throw new HttpError(502, `ElevenLabs respondió ${r.status}.`);
     return { audio: Buffer.from(await r.arrayBuffer()), mimeType: 'audio/mpeg' };
+  }
+
+  if (voiceProvider(cfg) === 'speechify') {
+    // Formato de la API de Speechify según lo que se conoce de su documentación (SIN verificar contra la API real):
+    // POST /v1/audio/speech con «Authorization: Bearer», cuerpo {input, voice_id, audio_format, model} y respuesta JSON con audio_data en base64.
+    const r = await fetchImpl(`${cfg.urls.speechify}/v1/audio/speech`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.SPEECHIFY_API_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ input: text, voice_id: env.SPEECHIFY_VOICE_ID, audio_format: 'mp3', model: env.SPEECHIFY_MODEL || 'simba-multilingual' })
+    });
+    if (!r.ok) throw new HttpError(502, `Speechify respondió ${r.status}.`);
+    if ((r.headers.get('content-type') ?? '').startsWith('audio/')) return { audio: Buffer.from(await r.arrayBuffer()), mimeType: 'audio/mpeg' };   // por si responde el audio directamente
+    const j = await r.json().catch(() => null) as { audio_data?: string } | null;
+    if (!j?.audio_data) throw new HttpError(502, 'Speechify no devolvió audio.');
+    return { audio: Buffer.from(j.audio_data, 'base64'), mimeType: 'audio/mpeg' };
   }
 
   const resp = await geminiGenerate({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL!, baseUrl: cfg.urls.gemini, fetch: fetchImpl },
