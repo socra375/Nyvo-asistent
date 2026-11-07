@@ -1,7 +1,7 @@
 # Nyvo · segundo director de AINova System
 
 Asistente de IA que se ocupa **solo de «Mis negocios»** de AINova System: clientes, cobros, documentos, reportes y archivos.
-Interfaz tipo HUD (centro de mando) con el núcleo de voz de Nyvo y paneles de **Clientes** (AINova), **Archivos principales** (Google Drive), **Notion**, **Trabajos** y el **chat con tarjetas**.
+La pantalla principal es **solo el orbe** (cuatro secciones: Rose, Johan, Mia y Nyvo) con conversación por voz que se puede interrumpir ([`docs/VOZ.md`](docs/VOZ.md)); el **Panel** (centro de mando) tiene los paneles de **Clientes** (AINova), **Archivos principales** (Google Drive), **Notion**, **Trabajos** y el **chat con tarjetas**.
 
 - Toda acción que cambia datos externos (responder a un cliente, marcar un cobro…) pide **confirmación en una tarjeta**.
   Única excepción aprobada: guardar notas y reportes en el espacio «Nyvo» de Notion se hace solo y deja una tarjeta **Deshacer** (se puede apagar en Conectores).
@@ -131,7 +131,8 @@ api/index.ts              única función serverless (enrutador /api/*)
 server/                   http, auth (sesiones, Google OAuth+PKCE), db (migraciones), agents (principal + especialistas),
                           actions (tarjetas), jobs (cola), memory, voice (TTS/STT), crypto (AES-GCM, scrypt)
 connectors/<id>/          ainova (API REST), notion, google-drive, memoria, gemini, voz + registry.ts
-web/src/                  HUD en React (núcleo, paneles, chat con tarjetas, conectores, memoria, voz)
+web/src/                  React: orb/ (orbe de partículas), voice/ (VAD, cola de voz, conversación), paneles, chat con tarjetas, conectores, memoria
+brain/                    nyvo_core_system.md: el cerebro de Nyvo (se incrusta al compilar con npm run build:brain)
 tests/unit, tests/e2e     node --test y Playwright; tests/fakes/upstream.ts imita los servicios externos
 design/                   logo original (logo-source.png) y make-icons.py, que genera los iconos de web/public/
 ```

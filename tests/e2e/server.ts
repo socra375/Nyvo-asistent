@@ -35,6 +35,8 @@ if (!bare) {
   const up = await startUpstream(Number(process.env.UPSTREAM_PORT ?? 4110));
   Object.assign(env, upstreamEnv(up.url, up.state));
 }
+// La voz falsa dura lo bastante para que la interrupción (barge-in) caiga mientras «habla».
+process.env.FAKE_TTS_SECONDS ??= '10';
 Object.assign(process.env, env);
 
 const { getDb } = await import('../../server/db/pool.js');
