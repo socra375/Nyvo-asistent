@@ -5,7 +5,7 @@
   "description": "Nyvo: segundo director de AINova System, asistente de IA para «Mis negocios».",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "node --import tsx server/dev.ts",
