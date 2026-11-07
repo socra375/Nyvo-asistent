@@ -319,3 +319,28 @@ test('móvil: el HUD cabe sin desplazamiento horizontal @movil', async ({ page }
   expect(overflow).toBeLessThanOrEqual(0);
   await page.screenshot({ path: `${SHOTS}/movil.png`, fullPage: true });
 });
+
+test('estados hover y foco: pestañas, botones y filas responden al puntero y al teclado', async ({ page }) => {
+  await login(page);
+  const bg = (loc: ReturnType<Page['locator']>) => loc.evaluate(el => getComputedStyle(el).backgroundColor);
+  const tab = page.getByRole('tab', { name: 'Memoria' });
+  const before = await bg(tab);
+  await tab.hover();
+  await expect.poll(() => bg(tab)).not.toBe(before);
+
+  const row = page.getByTestId('panel-clientes').locator('li').first();
+  const rowBefore = await bg(row);
+  await row.hover();
+  await expect.poll(() => bg(row)).not.toBe(rowBefore);
+
+  // Botón: al pasar el puntero sube 1 px y con el teclado muestra el anillo de foco.
+  const nueva = page.getByRole('button', { name: 'Nueva' });
+  await nueva.hover();
+  await expect.poll(() => nueva.evaluate(el => getComputedStyle(el).transform)).not.toBe('none');
+  await page.mouse.move(0, 0);
+  await nueva.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(nueva).toBeFocused();
+  expect(await nueva.evaluate(el => getComputedStyle(el).boxShadow)).not.toBe('none');
+});
