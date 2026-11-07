@@ -5,7 +5,7 @@ import { bytesToBase64, concat, downsample, encodeWav, PreRoll, rms } from '../.
 import { chunkForSpeech } from '../../web/src/voice/chunker.js';
 import { SpeechQueue, type Playing } from '../../web/src/voice/speechQueue.js';
 import { stepConversation, type ConvEvent, type ConvState } from '../../web/src/voice/conversation.js';
-import { approach, createDynamics, createParticles, project, sectionAt, sectionWeights, SECTIONS, stepDynamics, type Hemi, type SectionMode } from '../../web/src/orb/orbModel.js';
+import { approach, createDynamics, createGraph, HUBS, project, SECTIONS, SECTION_RGB, stepDynamics, type Hemi, type SectionMode } from '../../web/src/orb/orbModel.js';
 
 const BLOCK_MS = 21;
 /** Alimenta el VAD con un nivel constante durante `ms` y devuelve los eventos con su instante. */
@@ -188,48 +188,75 @@ test('conversación: interrumpir a Nyvo corta la voz; cambiar de idea cancela la
   assert.equal(stepConversation('inactivo', { tipo: 'error' }).state, 'inactivo');
 });
 
-test('orbe: cuatro secciones fijas con mezcla suave; pesos suman 1', () => {
+test('orbe: grafo con cuatro clústeres, hubs con nombre y aristas válidas', () => {
   assert.deepEqual([...SECTIONS], ['rose', 'johan', 'mia', 'nyvo']);
-  const at = (deg: number) => sectionAt((deg * Math.PI) / 180);
-  assert.equal(at(-135), 'rose'); assert.equal(at(-45), 'johan'); assert.equal(at(45), 'mia'); assert.equal(at(135), 'nyvo');
-  for (let deg = -180; deg < 180; deg += 7) {
-    const w = sectionWeights((deg * Math.PI) / 180);
-    assert.ok(Math.abs(SECTIONS.reduce((n, s) => n + w[s], 0) - 1) < 1e-9, `suma 1 en ${deg}°`);
+  const g = createGraph(900);
+  const count = (s: Hemi) => g.nodes.filter(n => n.sec === s).length;
+  for (const s of SECTIONS) assert.ok(count(s) >= 10, `${s} tiene nodos`);
+  assert.ok(count('johan') > count('mia'), 'Johan es el casquete denso');
+  assert.deepEqual(g.hubs.map(i => g.nodes[i]!.label), HUBS.map(h => h.label), 'cada hub lleva su nombre');
+  g.hubs.forEach((i, k) => assert.equal(g.nodes[i]!.sec, HUBS[k]!.sec));
+  assert.ok(g.edges.length > g.nodes.length, 'red densa: más aristas que nodos');
+  const keys = new Set<string>();
+  for (const [a, b] of g.edges) {
+    assert.ok(a !== b && g.nodes[a] && g.nodes[b]);
+    const k = a < b ? `${a}-${b}` : `${b}-${a}`;
+    assert.ok(!keys.has(k), 'sin aristas repetidas'); keys.add(k);
   }
-  const edge = sectionWeights(-Math.PI / 2);   // justo entre Rose y Johan
-  assert.ok(Math.abs(edge.rose - 0.5) < 1e-9 && Math.abs(edge.johan - 0.5) < 1e-9);
+  assert.equal(SECTIONS.reduce((n, s) => n + g.edgesBySec[s].length, 0), g.edges.length);
+  // Los clústeres ocupan su lado: Johan a la izquierda, Mia a la derecha.
+  const mean = (s: Hemi) => g.nodes.filter(n => n.sec === s).reduce((a, n) => a + n.x, 0) / count(s);
+  assert.ok(mean('johan') < -0.4 && mean('mia') > 0.2, 'Johan a la izquierda y Mia a la derecha');
+  // Naranja, azul y rosa distintos
+  assert.notDeepEqual(SECTION_RGB.johan, SECTION_RGB.mia);
 });
 
-test('orbe: partículas uniformes y deterministas; el giro mueve la esfera sin deformarla', () => {
-  const a = createParticles(500, 3), b = createParticles(500, 3);
-  assert.deepEqual(a[17], b[17]);
-  assert.ok(a.every(p => Math.abs(Math.hypot(p.x, p.y, p.z) - 1) < 1e-9), 'todas sobre la esfera');
+test('orbe: determinista, dentro del encuadre, y el giro mueve el grafo', () => {
+  const a = createGraph(500, 3), b = createGraph(500, 3);
+  assert.deepEqual(a.nodes[40], b.nodes[40]);
+  assert.deepEqual(a.edges.slice(0, 50), b.edges.slice(0, 50));
   const d = createDynamics();
-  const p0 = project(a[40]!, d, { sx: 0, sy: 0, depth: 0, angle: 0 });
-  const x0 = p0.sx, y0 = p0.sy;
-  d.yaw = 1.2;
-  const p1 = project(a[40]!, d, { sx: 0, sy: 0, depth: 0, angle: 0 });
-  assert.ok(Math.hypot(p1.sx - x0, p1.sy - y0) > 0.05, 'al girar cambia de posición');
-  assert.ok(Math.hypot(p1.sx, p1.sy) < 1.35, 'sigue dentro del orbe');
+  const out = { sx: 0, sy: 0, depth: 0 };
+  for (const nd of a.nodes) {
+    project(nd, d, out);
+    assert.ok(Number.isFinite(out.sx) && Number.isFinite(out.sy));
+    assert.ok(Math.abs(out.sx) < 1.4 && Math.abs(out.sy) < 1.1, 'dentro del encuadre');
+    assert.ok(out.depth >= -1.2 && out.depth <= 1.2);
+  }
+  project(a.nodes[40]!, d, out);
+  const x0 = out.sx, y0 = out.sy;
+  d.yaw += 1.2;
+  project(a.nodes[40]!, d, out);
+  assert.ok(Math.hypot(out.sx - x0, out.sy - y0) > 0.05, 'al girar cambia de posición');
 });
 
-test('orbe: la dinámica es suave, depende del estado y respeta «reducir movimiento»', () => {
+test('orbe: la dinámica es suave, depende del estado, respeta «reducir movimiento» y las señales están acotadas', () => {
+  const g = createGraph(500);
   const idle: Record<Hemi, SectionMode> = { rose: 'reposo', johan: 'reposo', mia: 'reposo', nyvo: 'reposo' };
   const run = (mode: 'reposo' | 'pensando' | 'hablando', secs = idle, seconds = 4, level = 0, reducedMotion = false) => {
     const d = createDynamics();
-    for (let i = 0; i < seconds * 60; i++) stepDynamics(d, 1 / 60, { mode, sections: secs, level, reducedMotion });
+    for (let i = 0; i < seconds * 60; i++) stepDynamics(d, 1 / 60, { mode, sections: secs, level, reducedMotion }, g);
     return d;
   };
   assert.ok(run('pensando').spin > run('reposo').spin * 3, 'pensando gira más rápido');
   assert.ok(run('pensando', idle, 4, 0, true).spin < run('pensando').spin * 0.4, 'reducir movimiento atenúa el giro');
   const johan = run('pensando', { ...idle, johan: 'activo' }, 2);
   assert.ok(johan.act.johan > 0.9 && johan.act.rose < 0.3, 'solo la sección activa se enciende');
-  const speaking = run('hablando', idle, 2, 0.8);
-  assert.ok(speaking.level > 0.7);
+  assert.ok(run('hablando', idle, 2, 0.8).level > 0.7);
   assert.ok(Math.abs(approach(0, 1, 1, 1) - (1 - Math.exp(-1))) < 1e-12);
-  const d = createDynamics();
-  stepDynamics(d, 5, { mode: 'reposo', sections: idle, level: 0 });
-  assert.ok(d.clock <= 0.1, 'un parón largo de la pestaña no da un salto');
+  const d0 = createDynamics();
+  stepDynamics(d0, 5, { mode: 'reposo', sections: idle, level: 0 }, g);
+  assert.ok(d0.clock <= 0.1, 'un parón largo de la pestaña no da un salto');
+  const thinking = run('pensando', idle, 3);
+  assert.ok(thinking.pulses.length > 0 && thinking.pulses.length <= 70, 'hay señales viajando, acotadas');
+  assert.ok(thinking.pulses.every(p => p.edge < g.edges.length && p.t >= 0 && p.t < 1));
+  assert.ok(run('pensando', idle, 3, 0, true).pulses.length < thinking.pulses.length, 'con menos movimiento, menos señales');
+  // Con una sección activa, las señales se concentran en sus aristas
+  const focused = run('pensando', { ...idle, mia: 'activo' }, 3);
+  const inMia = focused.pulses.filter(p => p.sec === 'mia').length;
+  assert.ok(inMia >= focused.pulses.length * 0.5, `la mayoría en Mia (${inMia}/${focused.pulses.length})`);
   const sweep = run('pensando', idle, 1.3);
-  assert.ok(SECTIONS.filter(s => sweep.act[s] > 0.5).length >= 1, 'pensando sin herramienta recorre las secciones');
+  assert.ok(SECTIONS.filter(s => sweep.act[s] > 0.4).length >= 1, 'pensando sin herramienta recorre los clústeres');
+  const speaking = run('hablando', idle, 2, 0.8);
+  assert.ok(speaking.waves.length > 0 && speaking.waves.length <= 6, 'ondas desde el núcleo al hablar');
 });
