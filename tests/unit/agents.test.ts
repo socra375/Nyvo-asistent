@@ -23,7 +23,7 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     const st = await connectorStatuses(makeDeps(db, {}), userId);
     const ainova = st.find(c => c.id === 'ainova')!;
     assert.equal(ainova.state, 'falta_configurar');
-    assert.deepEqual(ainova.missingEnv, ['AINOVA_MCP_URL', 'AINOVA_MCP_TOKEN']);
+    assert.deepEqual(ainova.missingEnv, ['AINOVA_API_URL', 'AINOVA_API_KEY']);
     assert.equal(st.find(c => c.id === 'memoria')!.state, 'listo');
     const voz = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: 'elevenlabs' }), userId)).find(c => c.id === 'voz')!;
     assert.deepEqual(voz.missingEnv, ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']);
@@ -44,12 +44,12 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.ok(!byName.has('ainova__add_agent_item'), 'herramientas ocultas no se exponen');
     assert.ok(byName.has('memoria__recordar'));
     assert.deepEqual(unavailable, []);
-    const off = await toolsForRole(makeDeps(db, { ...env, AINOVA_MCP_TOKEN: '' }), userId, 'negocios');
+    const off = await toolsForRole(makeDeps(db, { ...env, AINOVA_API_KEY: '' }), userId, 'negocios');
     assert.deepEqual(off.unavailable.map(u => u.state), ['falta_configurar']);
   });
 
   test('token incorrecto de AINova: el conector queda en error, sin romper', async () => {
-    const { unavailable } = await toolsForRole(makeDeps(db, { ...env, AINOVA_MCP_TOKEN: 'x'.repeat(40) }), userId, 'negocios');
+    const { unavailable } = await toolsForRole(makeDeps(db, { ...env, AINOVA_API_KEY: `ain_${'Z'.repeat(43)}` }), userId, 'negocios');
     assert.equal(unavailable[0]?.state, 'error');
   });
 
@@ -72,7 +72,7 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.equal(done.status, 'done');
     assert.equal(up.state.payments[0]!.status, 'pagado');
     await assert.rejects(confirmCard(deps, userId, r.cards[0]!.id), /ya no está pendiente/);
-    assert.equal(up.state.mcpCalls.filter(c => c === 'mark_payment_paid').length, 1);
+    assert.equal(up.state.apiCalls.filter(c => c === 'POST mark_payment_paid').length, 1);
   });
 
   test('cancelar y caducar tarjetas', async () => {
@@ -124,7 +124,7 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.equal(r.calls, 3);
     assert.equal(r.partial, true);
     assert.equal(r.text, 'Resumen parcial');
-    assert.equal(up.state.mcpCalls.filter(c => c === 'get_summary').length, 3);
+    assert.equal(up.state.apiCalls.filter(c => c === 'POST get_summary').length, 3);
   });
 
   test('plazo por petición: devuelve resultado parcial', async () => {
