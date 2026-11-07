@@ -63,7 +63,7 @@ export async function fail(db: Db, job: Pick<Job, 'id' | 'attempts' | 'max_attem
   const final = job.attempts >= job.max_attempts;
   await db.query(
     `update jobs set status = $2, error = $3, locked_until = null, run_after = now() + make_interval(secs => $4), updated_at = now() where id = $1`,
-    [job.id, final ? 'failed' : 'queued', error.slice(0, 1000), final ? 0 : backoffSeconds(job.attempts)]);
+    [job.id, final ? 'failed' : 'queued', error.slice(0, 300), final ? 0 : backoffSeconds(job.attempts)]);
   return final ? 'failed' : 'retry';
 }
 

@@ -21,6 +21,26 @@ export interface Card {
 
 const COLS = 'id, kind, connector_id, tool, args, summary, status, result, error, expires_at, created_at';
 
+/** Campos de un resultado que sirven para el historial y el soporte (identificadores), nunca datos de clientes. */
+const KEEP_IN_RESULT = ['id', 'pageId', 'url', 'number', 'status', 'estado', 'seccion'] as const;
+
+/**
+ * Lo que se guarda del resultado de una herramienta: solo identificadores y el tamaño. Nada del contenido.
+ * Así la base de Nyvo no se convierte en una copia de los datos de AINova (clientes, cobros, facturas).
+ * La aplicación no lee este campo: la deshacer usa `undo`, y el resultado completo ya se usó en memoria.
+ */
+export function slimResult(result: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    for (const k of KEEP_IN_RESULT) {
+      const v = (result as Record<string, unknown>)[k];
+      if ((typeof v === 'string' && v.length <= 300) || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    }
+  }
+  out.caracteres = JSON.stringify(result ?? null).length;
+  return out;
+}
+
 /** Tarjeta de confirmación: la acción NO se ejecuta hasta que el usuario pulse «Confirmar». */
 export async function createConfirmCard(deps: Deps, p: { userId: string; conversationId: string | null; connectorId: string; tool: string; args: Record<string, unknown>; summary: string }): Promise<Card> {
   const r = await deps.db.query<Card>(
@@ -36,7 +56,7 @@ export async function createUndoCard(deps: Deps, p: { userId: string; conversati
   const r = await deps.db.query<Card>(
     `insert into pending_actions (user_id, conversation_id, kind, connector_id, tool, args, summary, status, result, undo, expires_at, decided_at)
      values ($1, $2, 'undo', $3, $4, $5, $6, 'done', $7, $8, now() + interval '7 days', now()) returning ${COLS}`,
-    [p.userId, p.conversationId, p.connectorId, p.tool, p.args, p.summary.slice(0, 500), JSON.stringify(p.result ?? null), p.undo]);
+    [p.userId, p.conversationId, p.connectorId, p.tool, p.args, p.summary.slice(0, 500), JSON.stringify(slimResult(p.result)), p.undo]);
   await audit(deps.db, p.userId, 'accion.auto', { connector: p.connectorId, tool: p.tool });
   return r.rows[0]!;
 }
@@ -74,11 +94,11 @@ export async function confirmCard(deps: Deps, userId: string, id: string): Promi
     const { tool, ctx } = await findTool(deps, userId, card.connector_id, card.tool);
     const result = await tool.run(card.args, ctx);
     await audit(deps.db, userId, 'accion.confirmada', { connector: card.connector_id, tool: card.tool }, true);
-    return (await deps.db.query<Card>(`update pending_actions set status = 'done', result = $2 where id = $1 returning ${COLS}`, [id, JSON.stringify(result ?? null)])).rows[0]!;
+    return (await deps.db.query<Card>(`update pending_actions set status = 'done', result = $2 where id = $1 returning ${COLS}`, [id, JSON.stringify(slimResult(result))])).rows[0]!;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await audit(deps.db, userId, 'accion.confirmada', { connector: card.connector_id, tool: card.tool, error: msg }, false);
-    return (await deps.db.query<Card>(`update pending_actions set status = 'failed', error = $2 where id = $1 returning ${COLS}`, [id, msg.slice(0, 500)])).rows[0]!;
+    return (await deps.db.query<Card>(`update pending_actions set status = 'failed', error = $2 where id = $1 returning ${COLS}`, [id, msg.slice(0, 300)])).rows[0]!;
   }
 }
 

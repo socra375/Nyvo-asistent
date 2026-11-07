@@ -39,7 +39,7 @@
    - «Le cuento algo y lo guarda solo en Notion». `guardar_nota` y `crear_reporte` escriben **solo dentro de la página «Nyvo»** sin tarjeta previa y dejan una tarjeta **Deshacer**, que archiva la página.
    - Es el ajuste `autoGuardar` del conector Notion: si se apaga, también piden confirmación.
    - Cualquier otra escritura en Notion (`anexar_a_pagina`) pide confirmación.
-7. **Seguridad:**
+7. **Seguridad** (la base de datos, con su auditoría, mapa de datos y retención, está en [`DATABASE.md`](DATABASE.md)):
    - **Sesiones:** token aleatorio en una cookie `HttpOnly; SameSite=Lax; Secure`; en la base solo va su hash SHA-256. No hace falta `SESSION_SECRET`.
    - **CSRF:** las escrituras se rechazan si `Origin`/`Sec-Fetch-Site` no son del mismo origen.
    - **Intentos de login:** límite de 10 fallidos por IP cada 15 min. Entrar bien no cuenta.
@@ -71,7 +71,7 @@
 | Protección de Vercel | «Vercel Authentication» solo en previsualizaciones. En producción estaba activa y habría bloqueado el retorno de Google y el disparador de GitHub Actions. Nyvo ya tiene su propio acceso (lista de correos) |
 | Variables en producción | `NYVO_OWNER_EMAIL`, `AINOVA_API_URL`, `APP_URL`, `NYVO_ENC_KEY` (secreta), `CRON_SECRET` (visible solo desde el panel de Vercel) |
 | Despliegue de comprobación | Rama de trabajo desplegada y en estado READY. `/api/health` responde, la web carga y `/api/session` dice «Falta configurar DATABASE_URL» en vez de romperse |
-| **Neon** · proyecto `Nyvo-BD` (creado el 7 nov 2026 desde la integración de Vercel) | Creado por el dueño (el MCP de Neon no puede crear proyectos en una organización gestionada por Vercel). Vercel inyectó `DATABASE_URL` en producción y previsualización. El build de producción aplicó la migración `001_base.sql`: están las 13 tablas de Nyvo más `schema_migrations`. La integración añadió además un esquema `neon_auth` que Nyvo no usa |
+| **Neon** · proyecto `Nyvo-BD` (creado el 7 nov 2026 desde la integración de Vercel; auditoría y endurecimiento en [`DATABASE.md`](DATABASE.md)) | Creado por el dueño (el MCP de Neon no puede crear proyectos en una organización gestionada por Vercel). Vercel inyectó `DATABASE_URL` en producción y previsualización. El build de producción aplicó la migración `001_base.sql`: están las 13 tablas de Nyvo más `schema_migrations`. La integración añadió además un esquema `neon_auth` que Nyvo no usa |
 | **Google Cloud** | **No creado.** Sin sesión de `gcloud` en la sesión de desarrollo, y la pantalla de consentimiento y el cliente OAuth web no se pueden crear por API |
 | **Notion** | **No creado.** El conector de la sesión de desarrollo apunta a otra cuenta (`marcosjimenezpolanco323@gmail.com`), no a la de la empresa, así que no se escribió nada ahí |
 
@@ -80,10 +80,11 @@
 En esta sesión, en local, con Postgres 16 real:
 
 - `npm run lint`, `tsc` (servidor y web) y `vite build` en verde.
-- **`npm test` (node --test): 66 pruebas.**
+- **`npm test` (node --test): 77 pruebas.**
   - **Funciones puras:** cifrado, contraseñas, palabra clave (positivos, negativos y espera), conversión de esquemas JSON → Gemini, WAV y límite de TTS, id_token, Notion, Drive y configuración.
   - **Cola de trabajos:** reintentos, `SKIP LOCKED`, recuperación tras corte y `runTick`.
   - **Registro de conectores:** «falta configurar» con variables exactas, «falta conectar» y clave incorrecta → error sin romper.
+  - **Base de datos, 10 pruebas (Postgres real):** una fila no puede colgar de la conversación de otro usuario; al borrar una conversación se conservan trabajos y tarjetas con su dueño; ningún secreto en claro (contraseña, token de sesión, tokens de Google, verificador PKCE); límites de tamaño; `PUBLIC` sin permisos (también en tablas futuras); guardas de diseño (toda tabla con `user_id` y comentario, toda clave foránea con índice); retención (se purga lo caducado, se vacía el detalle viejo, lo reciente no se toca, idempotente, una vez por hora); y aislamiento por la API con dos usuarios (conversaciones, tarjetas, trabajos, memoria y conectores). Se comprobó además que las defensas son lo que bloquea: sin ellas, el cruce entre usuarios y la contraseña en claro sí entran.
   - **Conector de AINova (API REST), 14 pruebas:** dirección base y HTTPS obligatorio; escritura según `write`; herramientas ocultas; una sola petición por herramienta y caché de la lista; clave de solo lectura (no ve las de escritura y forzarlas da 403); clave mal formada (no sale ninguna petición); 401 con clave revocada; 429 sin reintentar; error de la herramienta; aviso de AINova junto al resultado; muro de Vercel diagnosticado; redirección no seguida (la clave no llega a otro sitio); sin conexión.
   - **Tarjetas:** confirmar una sola vez, cancelar, caducar, y la excepción de Notion con Deshacer y con `autoGuardar` apagado.
   - **Especialista:** solo ve la tarea, con su tope de llamadas y su plazo.

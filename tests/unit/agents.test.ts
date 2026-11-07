@@ -70,6 +70,10 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.equal(up.state.payments[0]!.status, 'pendiente', 'no se ejecutó sin confirmar');
     const done = await confirmCard(deps, userId, r.cards[0]!.id);
     assert.equal(done.status, 'done');
+    // Minimización: de lo que devolvió AINova solo se guardan identificadores, no el contenido del cobro.
+    const stored = done.result as Record<string, unknown>;
+    assert.equal(stored.id, PENDING_PAYMENT_ID);
+    assert.ok(!('concept' in stored) && !('amount' in stored), 'el contenido del cobro no se copia a la base de Nyvo');
     assert.equal(up.state.payments[0]!.status, 'pagado');
     await assert.rejects(confirmCard(deps, userId, r.cards[0]!.id), /ya no está pendiente/);
     assert.equal(up.state.apiCalls.filter(c => c === 'POST mark_payment_paid').length, 1);
@@ -165,6 +169,8 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     await runTick(deps, 20_000);
     const job = (await db.query('select status from jobs where id = $1', [r.jobIds[0]])).rows[0]!;
     assert.equal(job.status, 'done');
+    const stored = (await db.query<{ result: Record<string, unknown> }>('select result from jobs where id = $1', [r.jobIds[0]])).rows[0]!.result;
+    assert.ok(!('texto' in stored) && typeof stored.caracteres === 'number', 'el texto ya está en el mensaje: no se duplica en la tabla de trabajos');
     const last = (await db.query(`select content, card_ids from messages where conversation_id = $1 order by created_at desc limit 1`, [r.conversationId])).rows[0]!;
     assert.match(last.content, /Trabajo terminado/);
     assert.equal(last.card_ids.length, 1);
