@@ -1,0 +1,53 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyvo
+          POSTGRES_PASSWORD: nyvo
+          POSTGRES_DB: nyvo_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nyvo" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://nyvo:nyvo@localhost:5432/nyvo_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Pruebas (node --test)
+        run: npm test
+      - name: Build (tipos + web)
+        run: npm run build
+      - name: Auditoría de dependencias de producción
+        run: npm audit --omit=dev --audit-level=high
+      - name: Chromium para Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Pruebas en Chromium real (Playwright)
+        run: npx playwright test --trace off
+      - name: Capturas y fallos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
