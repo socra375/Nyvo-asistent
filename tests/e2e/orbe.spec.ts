@@ -53,6 +53,9 @@ test('orbe: es la pantalla principal, con cuatro secciones, grafo de red y en mo
   const shotA = await page.getByTestId('orb-canvas').screenshot();
   await page.waitForTimeout(700);
   expect(await yaw()).toBeGreaterThan(a + 0.05);
+  // Giro continuo en un solo sentido (nunca vuelve atrás): tres lecturas seguidas, siempre mayores.
+  const y1 = await yaw(); await page.waitForTimeout(400); const y2 = await yaw(); await page.waitForTimeout(400); const y3 = await yaw();
+  expect(y2).toBeGreaterThan(y1); expect(y3).toBeGreaterThan(y2);
   expect((await page.getByTestId('orb-canvas').screenshot()).equals(shotA)).toBe(false);
   await page.screenshot({ path: `${SHOTS}/orbe.png` });
 });

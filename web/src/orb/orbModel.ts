@@ -133,10 +133,10 @@ export function createGraph(n: number, seed = 11): Graph {
 export interface Targets { spin: number; ring: number; glow: number; pulseHz: number; reach: number; spawn: number }
 /** Hacia dónde tiende la animación en cada estado (spawn = señales por segundo que recorren las aristas). */
 export const TARGETS: Record<Mode, Targets> = {
-  reposo:     { spin: 0.35, ring: 0.25, glow: 0.55, pulseHz: 0.25, reach: 0.00, spawn: 1.2 },
-  escuchando: { spin: 0.45, ring: 0.45, glow: 0.75, pulseHz: 0.50, reach: 0.30, spawn: 3 },
-  pensando:   { spin: 1.10, ring: 1.60, glow: 0.90, pulseHz: 1.60, reach: 0.10, spawn: 16 },
-  hablando:   { spin: 0.55, ring: 0.60, glow: 1.00, pulseHz: 0.80, reach: 0.60, spawn: 7 }
+  reposo:     { spin: 0.30, ring: 0.25, glow: 0.55, pulseHz: 0.25, reach: 0.00, spawn: 1.2 },
+  escuchando: { spin: 0.40, ring: 0.45, glow: 0.75, pulseHz: 0.50, reach: 0.30, spawn: 3 },
+  pensando:   { spin: 1.00, ring: 1.60, glow: 0.90, pulseHz: 1.60, reach: 0.10, spawn: 16 },
+  hablando:   { spin: 0.50, ring: 0.60, glow: 1.00, pulseHz: 0.80, reach: 0.60, spawn: 7 }
 };
 
 export interface Pulse { edge: number; t: number; speed: number; sec: Hemi; dir: 1 | -1 }
@@ -146,6 +146,7 @@ const MAX_WAVES = 6;
 
 export interface Dynamics {
   mode: Mode;
+  /** Ángulo de giro acumulado (rad): una vuelta completa son 2π; no se reinicia. */
   yaw: number; ringPhase: number; clock: number;
   spin: number; ring: number; glow: number; pulseHz: number; reach: number; spawn: number;
   /** Nivel de audio suavizado 0..1. */
@@ -161,7 +162,7 @@ export interface Dynamics {
 }
 
 export const createDynamics = (): Dynamics => ({
-  mode: 'reposo', yaw: 0.2, ringPhase: 0, clock: 0, ...TARGETS.reposo, level: 0,
+  mode: 'reposo', yaw: 0.35, ringPhase: 0, clock: 0, ...TARGETS.reposo, level: 0,
   act: { rose: 0, johan: 0, mia: 0, nyvo: 0 }, sweep: 0, pulses: [], waves: [], spawnAcc: 0, waveAcc: 0
 });
 
@@ -226,13 +227,10 @@ export function stepDynamics(d: Dynamics, dt: number, inp: StepInput, graph?: Gr
 
 export interface Projected { sx: number; sy: number; depth: number }
 
-/** Amplitud del balanceo en Y (rad): el grafo se mueve en 3D sin perder nunca la composición (el casquete naranja a la izquierda). */
-export const SWING = 0.62;
-
-/** Proyecta un nodo: balanceo en Y (d.yaw es la fase), inclinación suave que flota, deriva viva, perspectiva leve y empuje con la voz. */
+/** Proyecta un nodo: giro completo de 360° en Y (d.yaw es el ángulo en radianes), inclinación suave que flota, deriva viva, perspectiva leve y empuje con la voz. */
 export function project(p: GNode, d: Dynamics, out: Projected): Projected {
   const tilt = 0.2 + 0.08 * Math.sin(d.clock * 0.21);
-  const yaw = SWING * Math.sin(d.yaw);
+  const yaw = d.yaw;
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const px = p.x + 0.006 * Math.sin(p.seed + d.clock * 0.7), pz = p.z + 0.006 * Math.cos(p.seed * 1.7 + d.clock * 0.6);
   const x1 = px * cy + pz * sy;

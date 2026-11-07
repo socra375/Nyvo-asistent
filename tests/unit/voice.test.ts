@@ -230,6 +230,28 @@ test('orbe: determinista, dentro del encuadre, y el giro mueve el grafo', () => 
   assert.ok(Math.hypot(out.sx - x0, out.sy - y0) > 0.05, 'al girar cambia de posición');
 });
 
+test('orbe: gira 360° completos: tras 2π vuelve al mismo sitio y a media vuelta el casquete pasa al otro lado', () => {
+  const g = createGraph(500, 5);
+  const out = { sx: 0, sy: 0, depth: 0 };
+  const at = (yaw: number) => {
+    const d = createDynamics(); d.yaw = yaw;
+    return g.nodes.map(nd => { const p = project(nd, d, { ...out }); return [p.sx, p.sy, p.depth] as const; });
+  };
+  const a = at(0.7), b = at(0.7 + 2 * Math.PI);
+  a.forEach((p, i) => { assert.ok(Math.abs(p[0] - b[i]![0]) < 1e-9 && Math.abs(p[1] - b[i]![1]) < 1e-9, 'periodo 2π'); });
+  // Johan (casquete a la izquierda) pasa a la derecha a media vuelta, y el centro de Mia a la izquierda.
+  const mean = (pts: (readonly number[])[], sec: string) => { const idx = g.nodes.map((n, i) => (n.sec === sec ? i : -1)).filter(i => i >= 0); return idx.reduce((s, i) => s + pts[i]![0]!, 0) / idx.length; };
+  const front = at(0), back = at(Math.PI);
+  assert.ok(mean(front, 'johan') < -0.4 && mean(back, 'johan') > 0.4, 'Johan cruza de izquierda a derecha');
+  assert.ok(mean(front, 'mia') > 0.2 && mean(back, 'mia') < -0.2, 'Mia cruza de derecha a izquierda');
+  // El giro es continuo: avanzar el tiempo suma ángulo sin tope (no oscila)
+  const d = createDynamics();
+  const idle: Record<Hemi, SectionMode> = { rose: 'reposo', johan: 'reposo', mia: 'reposo', nyvo: 'reposo' };
+  const y0 = d.yaw;
+  for (let i = 0; i < 60 * 25; i++) stepDynamics(d, 1 / 60, { mode: 'reposo', sections: idle, level: 0 });
+  assert.ok(d.yaw - y0 > 2 * Math.PI, `en 25 s en reposo da más de una vuelta (${(d.yaw - y0).toFixed(1)} rad)`);
+});
+
 test('orbe: la dinámica es suave, depende del estado, respeta «reducir movimiento» y las señales están acotadas', () => {
   const g = createGraph(500);
   const idle: Record<Hemi, SectionMode> = { rose: 'reposo', johan: 'reposo', mia: 'reposo', nyvo: 'reposo' };
