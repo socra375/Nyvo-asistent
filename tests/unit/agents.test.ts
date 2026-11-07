@@ -27,6 +27,8 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.equal(st.find(c => c.id === 'memoria')!.state, 'listo');
     const voz = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: 'elevenlabs' }), userId)).find(c => c.id === 'voz')!;
     assert.deepEqual(voz.missingEnv, ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']);
+    const spf = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: ' Speechify ' }), userId)).find(c => c.id === 'voz')!;
+    assert.deepEqual(spf.missingEnv, ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID']);
   });
 
   test('Drive con variables pero sin permiso de Google: «falta conectar»', async () => {
