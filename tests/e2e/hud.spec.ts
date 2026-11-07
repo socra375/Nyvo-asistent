@@ -290,7 +290,7 @@ test('sin conectores configurados: cada panel dice qué variable falta, sin erro
   const base = 'http://localhost:3101';
   await login(page, base);
   await expect(page.getByTestId('panel-clientes')).toContainText('Falta configurar');
-  await expect(page.getByTestId('panel-clientes').getByText('AINOVA_MCP_TOKEN')).toBeVisible();
+  await expect(page.getByTestId('panel-clientes').getByText('AINOVA_API_KEY')).toBeVisible();
   await expect(page.getByTestId('panel-drive').getByText('GOOGLE_CLIENT_ID')).toBeVisible();
   await expect(page.getByTestId('panel-notion').getByText('NOTION_TOKEN')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Entrar con Google' })).toHaveCount(0);
@@ -300,7 +300,7 @@ test('sin conectores configurados: cada panel dice qué variable falta, sin erro
   await expect(lastAssistant(page)).toContainText('Falta configurar Gemini');
   await page.getByTestId('panel-clientes').getByRole('button', { name: 'Ver conectores →' }).click();
   await expect(page.getByTestId('conector-ainova')).toContainText('Falta configurar');
-  await expect(page.getByTestId('conector-ainova').getByText('✗ AINOVA_MCP_URL')).toBeVisible();
+  await expect(page.getByTestId('conector-ainova').getByText('✗ AINOVA_API_URL')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/falta-configurar.png`, fullPage: true });
 });
 

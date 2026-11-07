@@ -10,7 +10,7 @@ Interfaz tipo HUD (centro de mando) con el núcleo de voz de Nyvo y paneles de *
 
 ## Stack
 
-React + Vite (web) · Node 20+ en TypeScript · una función serverless de Vercel (`api/index.ts`, corte a 60 s) · Postgres en Neon · Gemini (texto, voz y transcripción) · cliente MCP para AINova · pruebas con `node --test` y Playwright (Chromium).
+React + Vite (web) · Node 20+ en TypeScript · una función serverless de Vercel (`api/index.ts`, corte a 60 s) · Postgres en Neon · Gemini (texto, voz y transcripción) · API REST con clave para AINova · pruebas con `node --test` y Playwright (Chromium).
 
 ## Desarrollo local
 
@@ -63,7 +63,7 @@ npm run build
 TEST_DATABASE_URL=postgres://usuario:clave@localhost:5432/nyvo_test npx playwright test --trace off
 ```
 
-Las pruebas de Playwright levantan servidores **falsos** de AINova MCP, Notion, Google (OAuth y Drive) y Gemini (`tests/fakes/upstream.ts`): ejercitan el código real sin red ni claves.
+Las pruebas de Playwright levantan servidores **falsos** de la API de AINova, Notion, Google (OAuth y Drive) y Gemini (`tests/fakes/upstream.ts`): ejercitan el código real sin red ni claves.
 El usuario de `TEST_DATABASE_URL` debe poder crear bases de datos (crea `nyvo_e2e` y `nyvo_e2e_bare`).
 
 ## Puesta en producción (cada paso lo confirma el dueño; nada se crea solo)
@@ -77,7 +77,7 @@ El usuario de `TEST_DATABASE_URL` debe poder crear bases de datos (crea `nyvo_e2
 3. Las migraciones se aplican solas en cada despliegue (`npm run vercel-build`). Para aplicarlas a mano: `npm run migrate`.
 
 ### 3. Vercel
-**Ya creado:** proyecto `nyvo-ainova` en el equipo Architec WebS, con la URL `https://nyvo-ainova.vercel.app`, Node 22.x, y las variables `NYVO_OWNER_EMAIL`, `AINOVA_MCP_URL`, `APP_URL`, `NYVO_ENC_KEY` y `CRON_SECRET`. Faltan las demás de [`.env.example`](.env.example) a medida que haces los pasos siguientes.
+**Ya creado:** proyecto `nyvo-ainova` en el equipo Architec WebS, con la URL `https://nyvo-ainova.vercel.app`, Node 22.x, y las variables `NYVO_OWNER_EMAIL`, `AINOVA_API_URL`, `APP_URL`, `NYVO_ENC_KEY` y `CRON_SECRET`. Faltan `AINOVA_API_KEY` y las demás de [`.env.example`](.env.example) a medida que haces los pasos siguientes.
 
 Si lo montas desde cero:
 1. Importa el repositorio como proyecto nuevo. Vercel detecta `vercel.json`: compila la web en `dist/` y despliega `api/index.ts` (60 s).
@@ -99,9 +99,20 @@ Si lo montas desde cero:
 2. Crea una página «Nyvo», compártela con la integración (… → Conexiones) y pon su enlace o id en `NOTION_ROOT_PAGE_ID`.
 3. Nyvo crea dentro las subpáginas «Notas» y «Reportes».
 
-### 6. AINova System (clientes y cobros)
-1. `AINOVA_MCP_URL=https://ainova-system.vercel.app/mcp`.
-2. `AINOVA_MCP_TOKEN`: hoy AINova solo acepta `EDDIE_TOKEN`. El plan es darle a Nyvo **su propio** `NYVO_TOKEN` (revocable por separado y visible en la auditoría): es la **fase 1b** en el repositorio AINOVA-System (ver `docs/Nyvo.md`). Hasta entonces el conector queda en «error» o «falta configurar»; no reutilices el token de Eddie salvo decisión explícita.
+### 6. AINova System (clientes, cobros y facturas)
+Nyvo se conecta a la **API REST con clave** de AINova (`/api/v1`), no a su MCP: una sola llamada HTTP por herramienta, con una clave propia que tiene permiso, caducidad y revocación.
+1. `AINOVA_API_URL=https://ainova-system.vercel.app` (ya está en Vercel).
+2. En el panel de AINova → **Configuración → Claves de acceso por API**, crea una clave llamada «Nyvo» con permiso **Lectura y escritura** y una caducidad (p. ej. 90 días). El panel la prueba por ti y la muestra **una sola vez**.
+3. En Vercel (proyecto `nyvo-ainova`) → Environment Variables, crea `AINOVA_API_KEY` con esa clave, tipo *Sensitive*, para Production, y redespliega. No la pegues en el chat ni en el repositorio.
+4. En Nyvo → Conectores, AINova debe pasar a «Listo».
+
+Con esa clave Nyvo puede leer clientes, proyectos, cobros, servicios y conversaciones; responder y escalar mensajes; crear y corregir clientes; crear proyectos y cobros pendientes; y preparar facturas, que quedan en **borrador** hasta que las apruebes en Mensajes. Nada borra datos ni cambia importes, y cada escritura pasa antes por una tarjeta de confirmación en Nyvo. AINova limita las llamadas (120 por minuto y 20 escrituras por minuto por clave): si rechaza, Nyvo avisa en vez de insistir.
+
+Si AINova responde 401 con una página de Vercel en lugar de JSON, «Vercel Authentication» está bloqueando las llamadas de servidor: desactívala para producción en el proyecto de AINova. Esta prueba debe devolver 401 con «Clave inválida, caducada o revocada»:
+
+```bash
+curl -i https://ainova-system.vercel.app/api/v1/tools
+```
 
 ### 7. Gemini y voz
 1. Crea una clave en Google AI Studio → `GEMINI_API_KEY`.
@@ -119,7 +130,7 @@ Si lo montas desde cero:
 api/index.ts              única función serverless (enrutador /api/*)
 server/                   http, auth (sesiones, Google OAuth+PKCE), db (migraciones), agents (principal + especialistas),
                           actions (tarjetas), jobs (cola), memory, voice (TTS/STT), crypto (AES-GCM, scrypt)
-connectors/<id>/          ainova (MCP), notion, google-drive, memoria, gemini, voz + registry.ts
+connectors/<id>/          ainova (API REST), notion, google-drive, memoria, gemini, voz + registry.ts
 web/src/                  HUD en React (núcleo, paneles, chat con tarjetas, conectores, memoria, voz)
 tests/unit, tests/e2e     node --test y Playwright; tests/fakes/upstream.ts imita los servicios externos
 design/                   logo original (logo-source.png) y make-icons.py, que genera los iconos de web/public/

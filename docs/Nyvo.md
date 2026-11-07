@@ -6,14 +6,16 @@
 - **Dónde vive:**
   - Es un proyecto Vercel aparte, en un subdominio `*.vercel.app`.
   - Usa su propia base Neon.
-  - Se conecta al panel de AINova (`ainova-system.vercel.app`) **solo por su conector MCP**.
+  - Se conecta al panel de AINova (`ainova-system.vercel.app`) **solo por su API REST con clave** (`/api/v1`).
 - **Cuentas:** Google y Notion son los de la cuenta de la empresa.
 
 ## Decisiones
 
 1. **AINova es la fuente de verdad** de clientes, proyectos, cobros y facturas.
    - Nyvo no duplica esas tablas ni toca la base de AINova.
-   - Lo lee y lo cambia por `/mcp`.
+   - Lo lee y lo cambia por su API REST (`/api/v1`), con una clave propia de Nyvo.
+   - Se usa la API y no el MCP: una sola llamada HTTP por herramienta (mi cliente MCP, al no tener sesión, necesitaba varias), y la clave tiene permiso, caducidad y revocación; el MCP usa un token único sin alcance.
+   - La clave nunca sigue redirecciones ni viaja sin HTTPS, y la lista de herramientas se guarda 60 s en memoria.
    - Si Nyvo tuviera su propio directorio de clientes, en semanas habría dos versiones que no coinciden.
 2. **Una sola función serverless** (`api/index.ts`) con un enrutador propio (`server/http/routes.ts`).
    - El plan gratuito de Vercel limita el número de funciones. AINova usa el mismo patrón.
@@ -67,7 +69,7 @@
 |---|---|
 | **Vercel** · proyecto `nyvo-ainova` (equipo Architec WebS), enlazado a `socra375/Nyvo-asistent`, rama de producción `main` | Creado. URL: `https://nyvo-ainova.vercel.app`. Node fijado en 22.x |
 | Protección de Vercel | «Vercel Authentication» solo en previsualizaciones. En producción estaba activa y habría bloqueado el retorno de Google y el disparador de GitHub Actions. Nyvo ya tiene su propio acceso (lista de correos) |
-| Variables en producción | `NYVO_OWNER_EMAIL`, `AINOVA_MCP_URL`, `APP_URL`, `NYVO_ENC_KEY` (secreta), `CRON_SECRET` (visible solo desde el panel de Vercel) |
+| Variables en producción | `NYVO_OWNER_EMAIL`, `AINOVA_API_URL`, `APP_URL`, `NYVO_ENC_KEY` (secreta), `CRON_SECRET` (visible solo desde el panel de Vercel) |
 | Despliegue de comprobación | Rama de trabajo desplegada y en estado READY. `/api/health` responde, la web carga y `/api/session` dice «Falta configurar DATABASE_URL» en vez de romperse |
 | **Neon** · proyecto `Nyvo-BD` (creado el 7 nov 2026 desde la integración de Vercel) | Creado por el dueño (el MCP de Neon no puede crear proyectos en una organización gestionada por Vercel). Vercel inyectó `DATABASE_URL` en producción y previsualización. El build de producción aplicó la migración `001_base.sql`: están las 13 tablas de Nyvo más `schema_migrations`. La integración añadió además un esquema `neon_auth` que Nyvo no usa |
 | **Google Cloud** | **No creado.** Sin sesión de `gcloud` en la sesión de desarrollo, y la pantalla de consentimiento y el cliente OAuth web no se pueden crear por API |
@@ -78,20 +80,21 @@
 En esta sesión, en local, con Postgres 16 real:
 
 - `npm run lint`, `tsc` (servidor y web) y `vite build` en verde.
-- **`npm test` (node --test): 46 pruebas.**
-  - **Funciones puras:** cifrado, contraseñas, palabra clave (positivos, negativos y espera), conversión de esquemas MCP → Gemini, WAV y límite de TTS, id_token, Notion, Drive y configuración.
+- **`npm test` (node --test): 66 pruebas.**
+  - **Funciones puras:** cifrado, contraseñas, palabra clave (positivos, negativos y espera), conversión de esquemas JSON → Gemini, WAV y límite de TTS, id_token, Notion, Drive y configuración.
   - **Cola de trabajos:** reintentos, `SKIP LOCKED`, recuperación tras corte y `runTick`.
-  - **Registro de conectores:** «falta configurar» con variables exactas, «falta conectar» y token incorrecto → error sin romper.
+  - **Registro de conectores:** «falta configurar» con variables exactas, «falta conectar» y clave incorrecta → error sin romper.
+  - **Conector de AINova (API REST), 14 pruebas:** dirección base y HTTPS obligatorio; escritura según `write`; herramientas ocultas; una sola petición por herramienta y caché de la lista; clave de solo lectura (no ve las de escritura y forzarlas da 403); clave mal formada (no sale ninguna petición); 401 con clave revocada; 429 sin reintentar; error de la herramienta; aviso de AINova junto al resultado; muro de Vercel diagnosticado; redirección no seguida (la clave no llega a otro sitio); sin conexión.
   - **Tarjetas:** confirmar una sola vez, cancelar, caducar, y la excepción de Notion con Deshacer y con `autoGuardar` apagado.
   - **Especialista:** solo ve la tarea, con su tope de llamadas y su plazo.
   - **Turno completo con Gemini** contra el servidor falso, trabajo en segundo plano y chat sin Gemini.
   - **API HTTP:** sesión, login, límite de intentos, CSRF, Google login y conexión de Drive con renovación de token, ajustes de conectores, memoria, voz (Gemini, ElevenLabs, límite, STT, tipos de audio), chat y tarjetas por HTTP, y tick con `CRON_SECRET`.
-- **Playwright en Chromium real: 16 pruebas, 15 en escritorio (1440×900) y 1 en móvil (Pixel 7).**
+- **Playwright en Chromium real: 17 pruebas, 16 en escritorio (1440×900) y 1 en móvil (Pixel 7).**
   - **Sesión:** login (correcto e incorrecto) y salir.
   - **Paneles:** Clientes (KPIs y búsqueda) y Drive («falta conectar» → OAuth falso, solo con el permiso de Drive → archivos).
   - **Chat y tarjetas:**
     - chat delegando en Negocios;
-    - tarjeta Cancelar/Confirmar contra el MCP;
+    - tarjeta Cancelar/Confirmar contra la API de AINova;
     - «Anota…» → Notion con Deshacer;
     - trabajo en segundo plano → resultado en el chat.
   - **Voz y palabra clave:**
@@ -114,7 +117,7 @@ En esta sesión, en local, con Postgres 16 real:
 | Qué | Motivo |
 |---|---|
 | Gemini real (texto, TTS, STT) | La red de la sesión bloquea `ai.google.dev` y la API, y no hay `GEMINI_API_KEY`. Se probó contra un servidor que imita el formato REST de `generateContent` |
-| MCP real de AINova | La red bloquea `ainova-system.vercel.app` (ENOTFOUND) y Nyvo aún no tiene token propio. Se probó con un servidor MCP real del SDK (mismas herramientas y anotaciones que AINova) |
+| API real de AINova | La red de la sesión de desarrollo bloquea `ainova-system.vercel.app` (ENOTFOUND) y la clave se crea en el panel de AINova. Se probó con un servidor falso que imita `/api/v1` (alcance de la clave, 401, 403, 429, avisos y redirecciones), no con la API ni la clave reales |
 | Notion y Google reales | Sin credenciales. Se probó contra imitaciones de sus API |
 | Despliegue en Vercel y Neon | No se crearon cuentas ni proyectos: requieren tu confirmación previa |
 | Palabra clave con voz real | Chromium sin interfaz no reconoce voz. Se probó con un reconocedor simulado. Hay que probarla en Chrome con micrófono |
@@ -132,13 +135,13 @@ En esta sesión, en local, con Postgres 16 real:
 5. **GitHub:** copiar `CRON_SECRET` desde Vercel a GitHub → Settings → Secrets → Actions, y crear la variable `NYVO_URL` con `https://nyvo-ainova.vercel.app`.
 6. **Contraseña del dueño** (opcional si solo entras con Google): `npm run owner:password`.
 7. Fusionar el PR y redesplegar: las migraciones se aplican solas en el build.
-8. Fase 1b en AINova: prompt listo en [`PROMPT-AINOVA-FASE-1B.md`](PROMPT-AINOVA-FASE-1B.md).
+8. **Clave de AINova:** crea en AINova → Configuración → Claves de acceso por API una clave «Nyvo» (lectura y escritura) y ponla en Vercel como `AINOVA_API_KEY` (README §6). Después comprueba que el conector pase a «Listo».
 
 **Siguientes fases:**
 
-- **Fase 1b (repositorio AINOVA-System):** aceptar `NYVO_TOKEN` además de `EDDIE_TOKEN` en `src/adapters/mcp/handler.ts`, registrar quién llamó en `audit_log`, añadir un botón «Abrir Nyvo» en el panel y actualizar `docs/MAP.md`. Requiere acceso de escritura a ese repositorio.
+- ~~**Fase 1b**~~ **Superada:** la sesión de AINova eligió claves de API con permiso, caducidad y revocación (PR #66, #69 y #70 de AINOVA-System) en lugar de un `NYVO_TOKEN` en el MCP. Nyvo usa esa API.
 - **Fase 2:**
-  - Facturas, cotizaciones y recibos en PDF usando la tabla `invoices` de AINova (nuevas herramientas MCP).
+  - Facturas, cotizaciones y recibos en PDF usando la tabla `invoices` de AINova (AINova ya expone `create_invoice` en borrador; faltan el PDF, las cotizaciones y los recibos).
   - Cuentas por cobrar y recordatorios.
   - Textos profesionales con el estilo aprendido.
   - **Habilidades de GitHub:** tabla `skills`, fijadas a un SHA, validación, tarjeta previa, contenido no confiable.
