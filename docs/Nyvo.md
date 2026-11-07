@@ -80,7 +80,7 @@
 En esta sesión, en local, con Postgres 16 real:
 
 - `npm run lint`, `tsc` (servidor y web) y `vite build` en verde.
-- **`npm test` (node --test): 77 pruebas.**
+- **`npm test` (node --test): 107 pruebas** (la fase 6 añade cerebro, hemisferios, flujo NDJSON, voz y orbe; ver [`VOZ.md`](VOZ.md)).
   - **Funciones puras:** cifrado, contraseñas, palabra clave (positivos, negativos y espera), conversión de esquemas JSON → Gemini, WAV y límite de TTS, id_token, Notion, Drive y configuración.
   - **Cola de trabajos:** reintentos, `SKIP LOCKED`, recuperación tras corte y `runTick`.
   - **Registro de conectores:** «falta configurar» con variables exactas, «falta conectar» y clave incorrecta → error sin romper.
@@ -123,6 +123,7 @@ En esta sesión, en local, con Postgres 16 real:
 | Despliegue en Vercel y Neon | No se crearon cuentas ni proyectos: requieren tu confirmación previa |
 | Palabra clave con voz real | Chromium sin interfaz no reconoce voz. Se probó con un reconocedor simulado. Hay que probarla en Chrome con micrófono |
 | Lectura en voz alta audible | Se verificó la respuesta `audio/wav`, no el sonido |
+| Interrupción con eco real y latencia de voz | El micrófono falso no oye a Nyvo y no hay Gemini real: umbrales y latencia (<1 s no está garantizada) por afinar en un equipo real. Ver [`VOZ.md`](VOZ.md) |
 
 ## Pendiente
 

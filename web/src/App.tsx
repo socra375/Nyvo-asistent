@@ -6,8 +6,10 @@ import { ClientsPanel, DrivePanel, JobsPanel, NotionPanel } from './panels/panel
 import { Chat } from './panels/Chat';
 import { ConnectorsView } from './panels/Connectors';
 import { MemoryView } from './panels/Memory';
+import { OrbScreen } from './orb/OrbScreen';
 
-type View = 'centro' | 'conectores' | 'memoria';
+type View = 'orbe' | 'centro' | 'conectores' | 'memoria';
+const TAB_LABEL: Record<View, string> = { orbe: 'Orbe', centro: 'Centro de mando', conectores: 'Conectores', memoria: 'Memoria' };
 
 function Clock() {
   const [now, setNow] = useState(() => new Date());
@@ -28,11 +30,13 @@ function takeUrlMessage(): { text: string; err: boolean } | null {
 export function App() {
   const [info, setInfo] = useState<SessionInfo | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [view, setView] = useState<View>('centro');
+  // Si llegamos de vuelta de Google (?conectado= / ?error=), se abre el panel para ver el resultado; si no, el orbe.
+  const [urlMsg] = useState(() => takeUrlMessage());
+  const [view, setView] = useState<View>(urlMsg ? 'centro' : 'orbe');
   const [core, setCore] = useState<CoreState>('reposo');
   const [refreshKey, setRefreshKey] = useState(0);
   const [jobs, setJobs] = useState<Job[] | null>(null);
-  const [toast, setToast] = useState<{ text: string; err: boolean } | null>(() => takeUrlMessage());
+  const [toast, setToast] = useState<{ text: string; err: boolean } | null>(urlMsg);
 
   const notify = useCallback((text: string, err = false) => setToast({ text, err }), []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 5000); return () => clearTimeout(t); }, [toast]);
@@ -78,6 +82,21 @@ export function App() {
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); setInfo({ ...info, user: null }); };
   const goConnectors = () => setView('conectores');
 
+  // Pantalla principal: solo el orbe. El panel completo está a un toque («Panel»).
+  if (view === 'orbe') {
+    return (
+      <>
+        <OrbScreen onActivity={onActivity} notify={notify} openPanel={() => setView('centro')} logout={logout} jobsActive={active} />
+        {toast && (
+          <div className={`toast ${toast.err ? 'err' : ''}`} role={toast.err ? 'alert' : 'status'}>
+            <span>{toast.text}</span>
+            <button type="button" className="btn small ghost" onClick={() => setToast(null)} aria-label="Cerrar aviso">✕</button>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -86,9 +105,9 @@ export function App() {
           <strong>NYVO</strong><span>// AINOVA SYSTEM</span>
         </div>
         <nav className="tabs" role="tablist" aria-label="Secciones">
-          {(['centro', 'conectores', 'memoria'] as View[]).map(v => (
+          {(['orbe', 'centro', 'conectores', 'memoria'] as View[]).map(v => (
             <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>
-              {v === 'centro' ? 'Centro de mando' : v === 'conectores' ? 'Conectores' : 'Memoria'}
+              {TAB_LABEL[v]}
             </button>
           ))}
         </nav>

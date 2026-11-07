@@ -7,11 +7,19 @@ const PASSWORD = 'clave-e2e-segura-123';
 const SHOTS = 'test-results/capturas';
 mkdirSync(SHOTS, { recursive: true });
 
-async function login(page: Page, base = '') {
+/** Entra y se queda en la pantalla del orbe (la principal). */
+async function loginOrb(page: Page, base = '') {
   await page.goto(`${base}/`);
   await page.getByLabel('Correo').fill(OWNER);
   await page.getByLabel('Contraseña').fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page.getByTestId('orbscreen')).toBeVisible();
+}
+
+/** Entra y abre el panel completo («Centro de mando»). */
+async function login(page: Page, base = '') {
+  await loginOrb(page, base);
+  await page.getByRole('button', { name: 'Panel', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Centro de mando' })).toBeVisible();
 }
 

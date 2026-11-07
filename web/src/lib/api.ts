@@ -52,3 +52,46 @@ export interface VoiceConfig { provider: string; missingEnv: string[]; maxChars:
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 export const money = (v: string | undefined) => (v === undefined ? '—' : `${Number(v).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`);
+
+export type Hemisphere = 'rose' | 'johan' | 'mia' | 'nyvo';
+export const HEMISPHERES: readonly Hemisphere[] = ['rose', 'johan', 'mia', 'nyvo'];
+export type ChatEvent =
+  | { tipo: 'pensando' }
+  | { tipo: 'hemisferio'; id: Hemisphere; estado: 'activo' | 'listo'; herramienta: string }
+  | { tipo: 'fin'; conversationId: string; reply: string; cards: Card[]; jobIds: string[]; partial: boolean }
+  | { tipo: 'error'; status: number; mensaje: string };
+
+/** Chat con progreso en vivo (NDJSON): llama a onEvent por cada línea y devuelve el evento final. */
+export async function streamChat(body: { message: string; conversationId: string | null; voice: boolean }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<Extract<ChatEvent, { tipo: 'fin' }>> {
+  const r = await fetch('/api/chat/stream', {
+    method: 'POST', credentials: 'same-origin', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (r.status === 401) onUnauthorized();
+  if (!r.ok || !r.body) {
+    const e = await r.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new ApiError(r.status, e.error ?? `Error ${r.status}`, e.code);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let last: Extract<ChatEvent, { tipo: 'fin' }> | null = null;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const e = JSON.parse(line) as ChatEvent;
+    if (e.tipo === 'error') throw new ApiError(e.status, e.mensaje);
+    if (e.tipo === 'fin') last = e;
+    onEvent(e);
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buf += dec.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+    }
+    if (done) break;
+  }
+  handle(buf);
+  if (!last) throw new ApiError(502, 'La respuesta se cortó antes de terminar. Inténtalo de nuevo.');
+  return last;
+}

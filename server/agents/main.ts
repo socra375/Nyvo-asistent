@@ -6,6 +6,8 @@ import { getStyle } from '../memory/memory.js';
 import { enqueue } from '../jobs/queue.js';
 import type { Card } from '../actions/actions.js';
 import { HttpError } from '../http/http.js';
+import { composeMainPrompt } from './brain.js';
+import type { OnEvent } from './events.js';
 
 /** Plazo total de una respuesta de chat: deja margen bajo el corte de 60 s de Vercel. */
 export const TURN_BUDGET_MS = 50_000;
@@ -26,18 +28,13 @@ const DELEGATE: FunctionDecl = {
   }
 };
 
-export function mainSystemPrompt(style: { description: string; samples: string[] }): string {
-  return [
-    'Eres Nyvo, el segundo director de AINova System. Te ocupas SOLO de «Mis negocios»: clientes, cobros, ventas, documentos y reportes de la empresa.',
-    'No tienes herramientas propias salvo «delegar»: encarga cada parte de la petición al especialista adecuado y luego responde al usuario con el resultado.',
-    `Especialistas:\n${Object.entries(SPECIALISTS).map(([id, s]) => `- ${id}: ${s.description}${s.availableFrom ? ` (disponible en la ${s.availableFrom})` : ''}`).join('\n')}`,
-    'Si el usuario te cuenta algo del negocio o te pide que lo recuerdes, delega en «documentos» para guardarlo en Notion.',
-    'Si la petición no es de tu ámbito, dilo con amabilidad. Si es un saludo o una pregunta sobre ti, responde sin delegar.',
-    'Respuestas breves y concretas. Usa listas cortas cuando ayuden.',
-    style.description ? `Estilo de escritura del usuario (imítalo en los textos que redactes para él): ${style.description}` : '',
-    style.samples.length ? `Ejemplos de su estilo:\n${style.samples.map(s => `«${s.slice(0, 600)}»`).join('\n')}` : '',
-    SECURITY_RULES
-  ].filter(Boolean).join('\n\n');
+export function mainSystemPrompt(style: { description: string; samples: string[] }, opts: { voice?: boolean } = {}): string {
+  return composeMainPrompt({
+    specialists: Object.entries(SPECIALISTS).map(([id, sp]) => `- ${id}: ${sp.description}${sp.availableFrom ? ` (disponible en la ${sp.availableFrom})` : ''}`).join('\n'),
+    style,
+    security: SECURITY_RULES,
+    voice: opts.voice
+  });
 }
 
 export interface TurnResult {
@@ -49,7 +46,8 @@ export interface TurnResult {
 }
 
 /** Un turno de chat: guarda el mensaje, delega en especialistas y guarda la respuesta (con sus tarjetas). */
-export async function runTurn(deps: Deps, p: { userId: string; conversationId: string | null; message: string }): Promise<TurnResult> {
+/** `voice`: la respuesta se leerá en voz alta (más corta). `onEvent`: progreso en vivo (qué hemisferio trabaja). */
+export async function runTurn(deps: Deps, p: { userId: string; conversationId: string | null; message: string; voice?: boolean; onEvent?: OnEvent }): Promise<TurnResult> {
   const message = p.message.trim();
   if (!message) throw new HttpError(400, 'El mensaje está vacío.');
   const conv = await getOrCreateConversation(deps.db, p.userId, p.conversationId, message);
@@ -66,7 +64,8 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   const turns: Turn[] = history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
   while (turns[0]?.role === 'model') turns.shift(); // el historial debe empezar con el usuario
   turns.push({ role: 'user', parts: [{ text: message }] });
-  const system = mainSystemPrompt(await getStyle(deps.db, p.userId));
+  const system = mainSystemPrompt(await getStyle(deps.db, p.userId), { voice: p.voice });
+  p.onEvent?.({ tipo: 'pensando' });
   const cards: Card[] = [];
   const jobIds: string[] = [];
   let reply = '';
@@ -93,7 +92,7 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
         response = { estado: 'en_segundo_plano', trabajo: job.id, mensaje: 'La tarea quedó en «Trabajos»; el resultado llegará a esta conversación.' };
       } else {
         const left = TURN_BUDGET_MS - (Date.now() - start) - 3000;
-        const r = await runSpecialist(deps, { userId: p.userId, conversationId: conv.id, specialist: sp, task, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left) });
+        const r = await runSpecialist(deps, { userId: p.userId, conversationId: conv.id, specialist: sp, task, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
         cards.push(...r.cards);
         partial ||= r.partial;
         response = {

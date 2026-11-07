@@ -1,6 +1,6 @@
 import type { Deps, User } from '../deps.js';
 import {
-  binary, clientIp, HttpError, isSameOriginWrite, isUuid, json, publicOrigin, readJson, redirect, str, type Req, type Res
+  binary, clientIp, HttpError, isSameOriginWrite, isUuid, json, publicOrigin, readJson, redirect, SECURITY_HEADERS, str, type Req, type Res
 } from './http.js';
 import { createSession, destroySession, isAllowedEmail, sessionUser, upsertUser } from '../auth/session.js';
 import { finishGoogleAuth, googleConfigured, saveGoogleTokens, startGoogleAuth } from '../auth/google.js';
@@ -161,8 +161,30 @@ priv('POST', '/api/chat', async ({ req, res, deps, user }) => {
   const body = await readJson(req);
   const message = str(body.message, 4000, 'mensaje');
   const conversationId = body.conversationId ? uuidParam(String(body.conversationId)) : null;
-  const r = await runTurn(deps, { userId: user.id, conversationId, message });
+  const r = await runTurn(deps, { userId: user.id, conversationId, message, voice: body.voice === true });
   json(res, 200, { ...r, cards: await listCards(deps, user.id, { ids: r.cardIds }) });
+});
+
+/**
+ * Igual que /api/chat, pero con progreso en vivo (NDJSON, una línea JSON por evento): el orbe sabe qué hemisferio
+ * trabaja mientras llega la respuesta. Eventos: {tipo:'pensando'}, {tipo:'hemisferio', id, estado, herramienta},
+ * y al final {tipo:'fin', …resultado, cards} o {tipo:'error', status, mensaje}.
+ */
+priv('POST', '/api/chat/stream', async ({ req, res, deps, user }) => {
+  // Se valida todo ANTES de abrir el flujo: un error de petición sale como JSON normal con su código HTTP.
+  const body = await readJson(req);
+  const message = str(body.message, 4000, 'mensaje');
+  const conversationId = body.conversationId ? uuidParam(String(body.conversationId)) : null;
+  res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
+  const send = (o: unknown) => { res.write(`${JSON.stringify(o)}\n`); };
+  try {
+    const r = await runTurn(deps, { userId: user.id, conversationId, message, voice: body.voice === true, onEvent: send });
+    send({ tipo: 'fin', ...r, cards: await listCards(deps, user.id, { ids: r.cardIds }) });
+  } catch (e) {
+    if (!(e instanceof HttpError)) console.error('chat/stream', e instanceof Error ? e.stack : e);
+    send({ tipo: 'error', status: e instanceof HttpError ? e.status : 500, mensaje: e instanceof HttpError ? e.message : 'Error interno.' });
+  }
+  res.end();
 });
 
 priv('GET', '/api/actions', async ({ res, deps, user }) => json(res, 200, { cards: await listCards(deps, user.id) }));
@@ -229,7 +251,7 @@ priv('GET', '/api/voice/config', async ({ res, deps }) => json(res, 200, {
 
 priv('POST', '/api/voice/tts', async ({ req, res, deps, user }) => {
   const body = await readJson(req, 50_000);
-  if (!(await allowAttempt(deps.db, `tts:${user.id}`, 30, 60))) throw new HttpError(429, 'Demasiadas peticiones de voz. Espera un minuto.');
+  if (!(await allowAttempt(deps.db, `tts:${user.id}`, 90, 60))) throw new HttpError(429, 'Demasiadas peticiones de voz. Espera un minuto.');
   const text = str(body.text, 20_000, 'texto');
   const speech = await synthesize(deps.cfg, deps.fetch, text);
   binary(res, speech.mimeType, speech.audio);

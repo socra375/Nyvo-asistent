@@ -79,6 +79,7 @@ export async function call(deps: Deps | null, method: string, path: string, opts
   const fake = {
     headersSent: false,
     writeHead(s: number, h: Record<string, string>) { status = s; headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v])); fake.headersSent = true; return fake; },
+    write(b: string | Buffer) { chunks.push(Buffer.isBuffer(b) ? b : Buffer.from(b)); return true; },
     end(b?: string | Buffer) { if (b) chunks.push(Buffer.isBuffer(b) ? b : Buffer.from(b)); },
     on() { return fake; }
   };
