@@ -6,7 +6,7 @@ Interfaz tipo HUD (centro de mando) con el núcleo de voz de Nyvo y paneles de *
 - Toda acción que cambia datos externos (responder a un cliente, marcar un cobro…) pide **confirmación en una tarjeta**.
   Única excepción aprobada: guardar notas y reportes en el espacio «Nyvo» de Notion se hace solo y deja una tarjeta **Deshacer** (se puede apagar en Conectores).
 - **Ninguna clave llega al navegador**: todo pasa por `/api` (una sola función serverless en Vercel).
-- Decisiones, lo probado y lo pendiente: [`docs/Nyvo.md`](docs/Nyvo.md). Conectores y variables: [`docs/CONNECTORS.md`](docs/CONNECTORS.md).
+- Decisiones, lo probado y lo pendiente: [`docs/Nyvo.md`](docs/Nyvo.md). Protección de datos (qué se guarda, cuánto tiempo y qué impide la base): [`docs/DATABASE.md`](docs/DATABASE.md). Conectores y variables: [`docs/CONNECTORS.md`](docs/CONNECTORS.md).
 
 ## Stack
 

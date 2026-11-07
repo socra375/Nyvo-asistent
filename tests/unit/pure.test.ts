@@ -10,6 +10,7 @@ import { driveEscape, kindOf } from '../../connectors/google-drive/index.js';
 import { backoffSeconds } from '../../server/jobs/queue.js';
 import { loadConfig, missingEnv } from '../../server/config.js';
 import { isSameOriginWrite } from '../../server/http/http.js';
+import { slimResult } from '../../server/actions/actions.js';
 
 test('cifrado AES-GCM: ida y vuelta, y falla si se altera', () => {
   const key = parseKey(Buffer.alloc(32, 1).toString('base64'))!;
@@ -127,4 +128,13 @@ test('escrituras solo desde el mismo origen', () => {
   assert.ok(isSameOriginWrite(r({ origin: 'https://nyvo.test', 'sec-fetch-site': 'same-origin' })));
   assert.equal(isSameOriginWrite(r({ origin: 'https://malo.test' })), false);
   assert.equal(isSameOriginWrite(r({ 'sec-fetch-site': 'cross-site' })), false);
+});
+
+test('minimización: del resultado de una herramienta solo se guardan identificadores y el tamaño', () => {
+  const r = slimResult({ id: 'abc', concept: 'Sitio web de Ana Pérez', amount: '450.00', email: 'ana@x.com', status: 'pagado', pageId: 'p1', url: 'https://notion.so/p1' });
+  assert.deepEqual(Object.keys(r).sort(), ['caracteres', 'id', 'pageId', 'status', 'url']);
+  assert.ok(!JSON.stringify(r).includes('Ana') && !JSON.stringify(r).includes('ana@x.com'));
+  assert.deepEqual(Object.keys(slimResult([{ name: 'Laura', email: 'l@x.com' }])), ['caracteres'], 'una lista de clientes no deja nada');
+  assert.deepEqual(Object.keys(slimResult(null)), ['caracteres']);
+  assert.equal(slimResult({ id: 'x'.repeat(301) }).id, undefined, 'un «id» enorme no se cuela');
 });

@@ -2,6 +2,7 @@ import type { Deps } from '../deps.js';
 import { claim, complete, fail, type Job } from './queue.js';
 import { runSpecialist, SPECIALISTS, type SpecialistId } from '../agents/specialists.js';
 import { addMessage } from '../agents/conversations.js';
+import { purgeIfDue } from '../retention.js';
 
 export type JobHandler = (deps: Deps, job: Job, remainingMs: number) => Promise<unknown>;
 
@@ -19,7 +20,8 @@ export const HANDLERS: Record<string, JobHandler> = {
       await addMessage(deps.db, job.user_id!, job.conversation_id, 'assistant',
         `Trabajo terminado: «${job.title}».\n\n${res.text}`, res.cards.map(c => c.id));
     }
-    return { texto: res.text, tarjetas: res.cards.map(c => c.id), parcial: res.partial };
+    // El texto ya queda en el mensaje de la conversación: no se duplica en la tabla de trabajos.
+    return { caracteres: res.text.length, tarjetas: res.cards.map(c => c.id), parcial: res.partial };
   }
 };
 
@@ -44,5 +46,7 @@ export async function runTick(deps: Deps, budgetMs = deps.cfg.limits.jobsTickBud
       if (outcome === 'failed') failed++;
     }
   }
+  // Retención: como mucho una vez por hora, y un fallo de la purga nunca debe estropear el procesamiento de trabajos.
+  try { await purgeIfDue(deps.db); } catch (e) { console.error('purga', e instanceof Error ? e.message : e); }
   return { processed, failed };
 }
