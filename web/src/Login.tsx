@@ -17,6 +17,7 @@ export function Login({ info, onLogin, error }: { info: SessionInfo; onLogin: (u
   return (
     <main className="login">
       <section className="panel" aria-labelledby="login-h">
+        <img className="login-logo" src="/logo-256.png" alt="Logo de Nyvo" width={128} height={128} />
         <h1 id="login-h">NYVO</h1>
         <p className="sub">Segundo director · AINova System</p>
         {!info.ownerConfigured && <div className="notice warn" role="status">Falta configurar <code>NYVO_OWNER_EMAIL</code> en el servidor: nadie puede entrar todavía.</div>}

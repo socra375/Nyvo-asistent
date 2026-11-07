@@ -81,7 +81,10 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><strong>NYVO</strong><span>// AINOVA SYSTEM</span></div>
+        <div className="brand">
+          <img className="brand-logo" src="/logo-96.png" alt="" width={32} height={32} />
+          <strong>NYVO</strong><span>// AINOVA SYSTEM</span>
+        </div>
         <nav className="tabs" role="tablist" aria-label="Secciones">
           {(['centro', 'conectores', 'memoria'] as View[]).map(v => (
             <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>

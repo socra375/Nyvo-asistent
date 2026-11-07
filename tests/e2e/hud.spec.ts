@@ -38,6 +38,41 @@ test('inicio de sesión: rechaza contraseña incorrecta y entra con la correcta'
   await expect(page.getByText(OWNER)).toBeVisible();
 });
 
+test('logo y PWA: el logo se ve de verdad y el navegador puede leer manifest e iconos', async ({ page }) => {
+  await page.goto('/');
+  const loginLogo = page.getByRole('img', { name: 'Logo de Nyvo' });
+  await expect(loginLogo).toBeVisible();
+  expect(await loginLogo.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+  await page.screenshot({ path: `${SHOTS}/login-logo.png` });
+
+  // Enlaces del <head> que usan el navegador y el sistema para el icono y la instalación.
+  const links = await page.evaluate(() => Object.fromEntries(
+    [...document.querySelectorAll('link[rel]')].map(l => [l.getAttribute('rel') + (l.getAttribute('sizes') ? `:${l.getAttribute('sizes')}` : ''), l.getAttribute('href')])));
+  expect(links['manifest']).toBe('/manifest.webmanifest');
+  expect(links['apple-touch-icon']).toBe('/apple-touch-icon.png');
+  expect(links['icon:32x32']).toBe('/favicon-32.png');
+
+  const res = await page.request.get('/manifest.webmanifest');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toContain('manifest+json');
+  const manifest = await res.json() as { icons: { src: string; sizes: string; purpose?: string }[] };
+  expect(manifest.icons.map(i => `${i.sizes}:${i.purpose}`)).toEqual(['192x192:any', '512x512:any', '192x192:maskable', '512x512:maskable']);
+  for (const icon of manifest.icons) {
+    const r = await page.request.get(icon.src);
+    expect(r.status(), icon.src).toBe(200);
+    expect(r.headers()['content-type'], icon.src).toContain('image/png');
+  }
+  for (const f of ['/favicon.ico', '/apple-touch-icon.png', '/favicon-32.png']) {
+    expect((await page.request.get(f)).status(), f).toBe(200);
+  }
+
+  // Dentro de la app, el logo aparece también en la barra superior.
+  await login(page);
+  const brand = page.locator('.brand-logo');
+  await expect(brand).toBeVisible();
+  expect(await brand.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+});
+
 test('centro de mando: clientes de AINova, KPIs y búsqueda', async ({ page }) => {
   await login(page);
   const clients = page.getByTestId('panel-clientes');

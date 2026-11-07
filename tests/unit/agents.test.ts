@@ -7,7 +7,7 @@ import { confirmCard, cancelCard, undoCard, listCards } from '../../server/actio
 import { connectorStatuses, toolsForRole, saveConnectorSettings } from '../../connectors/registry.js';
 import { clientsPanel } from '../../connectors/ainova/index.js';
 import { runTick } from '../../server/jobs/tick.js';
-import { freshDb, makeDeps, makeUser, needsDb, scriptedLlm } from '../helpers.js';
+import { freshDb, makeDeps, makeUser, needsDb, scriptedLlm, settleDeferred } from '../helpers.js';
 import { initialState, PENDING_PAYMENT_ID, startUpstream, upstreamEnv, type Upstream } from '../fakes/upstream.js';
 
 describe('conectores, especialistas y tarjetas', needsDb, () => {
@@ -158,6 +158,10 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     const deps = makeDeps(db, env);
     const r = await runTurn(deps, { userId, conversationId: null, message: 'Haz un reporte de cobros' });
     assert.equal(r.jobIds.length, 1);
+    // runTurn ya dejó un procesamiento en segundo plano (defer): se espera a que termine y, si
+    // quedara algo, runTick lo procesa. Sin la espera, ambos compiten por el trabajo y la prueba
+    // comprueba el estado «running» antes de que acabe.
+    await settleDeferred();
     await runTick(deps, 20_000);
     const job = (await db.query('select status from jobs where id = $1', [r.jobIds[0]])).rows[0]!;
     assert.equal(job.status, 'done');
