@@ -7,7 +7,7 @@
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/((?!api/|assets/|favicon\\.svg).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/)[^.]*)", "destination": "/index.html" }
   ],
   "headers": [
     {

@@ -122,4 +122,8 @@ server/                   http, auth (sesiones, Google OAuth+PKCE), db (migracio
 connectors/<id>/          ainova (MCP), notion, google-drive, memoria, gemini, voz + registry.ts
 web/src/                  HUD en React (núcleo, paneles, chat con tarjetas, conectores, memoria, voz)
 tests/unit, tests/e2e     node --test y Playwright; tests/fakes/upstream.ts imita los servicios externos
+design/                   logo original (logo-source.png) y make-icons.py, que genera los iconos de web/public/
 ```
+
+### Logo e iconos (PWA)
+El logo original está en `design/logo-source.png` (387×397 px, opaco). `python3 design/make-icons.py` (requiere Pillow) genera en `web/public/` el favicon, los iconos 192/512 (normales y «maskable» para Android), el `apple-touch-icon` y los logos de la interfaz. `web/public/manifest.webmanifest` los declara para poder instalar Nyvo como aplicación. Para iconos más nítidos, sustituye el original por una versión de 1024 px o más y vuelve a ejecutar el script.
