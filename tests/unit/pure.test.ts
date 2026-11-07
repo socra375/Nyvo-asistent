@@ -11,6 +11,7 @@ import { backoffSeconds } from '../../server/jobs/queue.js';
 import { loadConfig, missingEnv } from '../../server/config.js';
 import { isSameOriginWrite } from '../../server/http/http.js';
 import { slimResult } from '../../server/actions/actions.js';
+import { migrationPolicy } from '../../server/db/migrate.js';
 
 test('cifrado AES-GCM: ida y vuelta, y falla si se altera', () => {
   const key = parseKey(Buffer.alloc(32, 1).toString('base64'))!;
@@ -137,4 +138,14 @@ test('minimización: del resultado de una herramienta solo se guardan identifica
   assert.deepEqual(Object.keys(slimResult([{ name: 'Laura', email: 'l@x.com' }])), ['caracteres'], 'una lista de clientes no deja nada');
   assert.deepEqual(Object.keys(slimResult(null)), ['caracteres']);
   assert.equal(slimResult({ id: 'x'.repeat(301) }).id, undefined, 'un «id» enorme no se cuela');
+});
+
+test('migraciones: en Vercel solo se aplican en producción (las vistas previas comparten la base)', () => {
+  const flag = ['node', 'migrate.ts', '--if-configured', '--production-only'];
+  assert.equal(migrationPolicy(flag, { VERCEL_ENV: 'production' }).run, true);
+  assert.equal(migrationPolicy(flag, { VERCEL_ENV: 'preview' }).run, false);
+  assert.match(migrationPolicy(flag, { VERCEL_ENV: 'preview' }).reason ?? '', /preview.*comparte la base de producción/);
+  assert.equal(migrationPolicy(flag, { VERCEL_ENV: 'development' }).run, false);
+  assert.equal(migrationPolicy(flag, {}).run, true, 'fuera de Vercel (local, CI) sí migra');
+  assert.equal(migrationPolicy(['node', 'migrate.ts'], { VERCEL_ENV: 'preview' }).run, true, 'sin la bandera no cambia el comportamiento manual');
 });

@@ -52,6 +52,11 @@ Este mapa también está dentro de la base, en el comentario de cada tabla (`obj
 | Retención | Índices para purgar rápido | `purgeIfDue` (una vez por hora, dentro del procesador de trabajos) |
 | Permisos | `PUBLIC` sin acceso, también en tablas futuras | Consultas parametrizadas |
 
+## Migraciones: cuándo se aplican
+- Solo en el build de **producción** de Vercel (`--production-only`). Si el build de producción falla, la versión anterior sigue sirviendo.
+- **Las vistas previas de los PR no migran.** Neon inyecta el mismo `DATABASE_URL` en producción y vista previa, así que comparten una sola base. La migración 002 se aplicó a la base real durante la vista previa de su PR, antes de fusionar; desde entonces el build de una vista previa omite las migraciones. Consecuencia: la vista previa de un PR con una migración nueva corre contra el esquema anterior y puede fallar hasta fusionar. Alternativa más limpia: activar en la integración de Neon una rama de base de datos por cada vista previa.
+- Verificado en Postgres 18 de Neon (7 nov 2026): las claves compuestas con `ON DELETE SET NULL (columna)` y los CHECK de la migración 002 existen tal como están definidos.
+
 ## Qué se guarda de las acciones y de los trabajos
 - De lo que devuelve una herramienta se guardan solo `id`, `pageId`, `url`, `number`, `status`, `estado`, `seccion` y el tamaño en caracteres. Nunca el contenido (`slimResult`).
 - La respuesta de un trabajo en segundo plano queda en el mensaje de la conversación; en `jobs.result` solo van el tamaño y las tarjetas.

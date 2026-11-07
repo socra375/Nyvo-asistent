@@ -27,7 +27,24 @@ export async function migrate(db: Db, log: (m: string) => void = () => undefined
   return applied;
 }
 
+/**
+ * ¿Debe aplicarse la migración en este build? Con `--production-only` solo en producción de Vercel.
+ * Las vistas previas comparten la base de producción (Neon inyecta el mismo DATABASE_URL en ambos entornos):
+ * si migraran, una migración sin revisar tocaría la base real antes de fusionar el PR.
+ */
+export function migrationPolicy(argv: readonly string[], env: Record<string, string | undefined>): { run: boolean; reason?: string } {
+  if (argv.includes('--production-only') && env.VERCEL_ENV && env.VERCEL_ENV !== 'production') {
+    return { run: false, reason: `Migraciones omitidas: este build es de «${env.VERCEL_ENV}» y comparte la base de producción. Se aplican al fusionar.` };
+  }
+  return { run: true };
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const policy = migrationPolicy(process.argv, process.env);
+  if (!policy.run) {
+    console.log(policy.reason);
+    process.exit(0);
+  }
   const url = process.env.DATABASE_URL;
   if (!url) {
     if (process.argv.includes('--if-configured')) {

@@ -135,7 +135,7 @@ En esta sesión, en local, con Postgres 16 real:
 4. **Gemini:** poner `GEMINI_API_KEY` y elegir `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE`.
 5. **GitHub:** copiar `CRON_SECRET` desde Vercel a GitHub → Settings → Secrets → Actions, y crear la variable `NYVO_URL` con `https://nyvo-ainova.vercel.app`.
 6. **Contraseña del dueño** (opcional si solo entras con Google): `npm run owner:password`.
-7. Fusionar el PR y redesplegar: las migraciones se aplican solas en el build.
+7. Fusionar el PR y redesplegar: las migraciones se aplican solas en el build **de producción** (las vistas previas no migran).
 8. **Clave de AINova:** crea en AINova → Configuración → Claves de acceso por API una clave «Nyvo» (lectura y escritura) y ponla en Vercel como `AINOVA_API_KEY` (README §6). Después comprueba que el conector pase a «Listo».
 
 **Siguientes fases:**

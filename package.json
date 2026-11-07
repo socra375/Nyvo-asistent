@@ -11,7 +11,7 @@
     "dev": "node --import tsx server/dev.ts",
     "dev:web": "vite",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
-    "vercel-build": "npm run build && node --import tsx server/db/migrate.ts --if-configured",
+    "vercel-build": "npm run build && node --import tsx server/db/migrate.ts --if-configured --production-only",
     "lint": "eslint .",
     "test": "node --import tsx --test --test-concurrency=1 \"tests/unit/**/*.test.ts\"",
     "e2e": "playwright test --trace off",
