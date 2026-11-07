@@ -23,13 +23,22 @@ export async function freshDb(): Promise<Db> {
   return db;
 }
 
+/**
+ * Trabajo que la aplicación deja en segundo plano con `deps.defer` (waitUntil en Vercel).
+ * Las pruebas lo esperan con `settleDeferred()`: si no, competirían con él por el mismo trabajo.
+ */
+const deferred: Promise<unknown>[] = [];
+export async function settleDeferred(): Promise<void> {
+  while (deferred.length) await Promise.allSettled(deferred.splice(0));
+}
+
 export function makeDeps(db: Db, env: Env = {}, opts: { llm?: Llm | null; fetch?: typeof fetch } = {}): Deps {
   const full: Env = { NYVO_OWNER_EMAIL: OWNER, NYVO_ENC_KEY: ENC_KEY, DATABASE_URL: TEST_DB, ...env };
   const cfg = loadConfig(full);
   const f = opts.fetch ?? fetch;
   const llm = opts.llm !== undefined ? opts.llm
     : full.GEMINI_API_KEY && full.GEMINI_MODEL ? createGemini({ apiKey: full.GEMINI_API_KEY, model: full.GEMINI_MODEL, baseUrl: cfg.urls.gemini, fetch: f }) : null;
-  return { cfg, db, fetch: f, llm, defer: p => { void p.catch(() => undefined); } };
+  return { cfg, db, fetch: f, llm, defer: p => { deferred.push(p.catch(() => undefined)); } };
 }
 
 export async function makeUser(db: Db, email = OWNER): Promise<string> {
