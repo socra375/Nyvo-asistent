@@ -61,6 +61,18 @@
     - Una búsqueda muestra ejemplos con `gemini-3.1-flash-tts-preview` y otros más antiguos con `gemini-2.5-flash-preview-tts`, con voces como «Kore». No está confirmado cuál es el vigente.
     - Por la regla «si falta un dato, no lo inventes», `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE` quedan sin valor y el conector muestra «falta configurar» hasta que el dueño los elija.
 
+## Infraestructura creada (7 nov 2026)
+
+| Pieza | Estado |
+|---|---|
+| **Vercel** · proyecto `nyvo-ainova` (equipo Architec WebS), enlazado a `socra375/Nyvo-asistent`, rama de producción `main` | Creado. URL: `https://nyvo-ainova.vercel.app`. Node fijado en 22.x |
+| Protección de Vercel | «Vercel Authentication» solo en previsualizaciones. En producción estaba activa y habría bloqueado el retorno de Google y el disparador de GitHub Actions. Nyvo ya tiene su propio acceso (lista de correos) |
+| Variables en producción | `NYVO_OWNER_EMAIL`, `AINOVA_MCP_URL`, `APP_URL`, `NYVO_ENC_KEY` (secreta), `CRON_SECRET` (visible solo desde el panel de Vercel) |
+| Despliegue de comprobación | Rama de trabajo desplegada y en estado READY. `/api/health` responde, la web carga y `/api/session` dice «Falta configurar DATABASE_URL» en vez de romperse |
+| **Neon** | **No creado.** El MCP de Neon rechaza crear proyectos porque la organización la gestiona Vercel. Hay que crearlo desde la integración de Vercel (ver «Pendiente») |
+| **Google Cloud** | **No creado.** Sin sesión de `gcloud` en la sesión de desarrollo, y la pantalla de consentimiento y el cliente OAuth web no se pueden crear por API |
+| **Notion** | **No creado.** El conector de la sesión de desarrollo apunta a otra cuenta (`marcosjimenezpolanco323@gmail.com`), no a la de la empresa, así que no se escribió nada ahí |
+
 ## Lo probado
 
 En esta sesión, en local, con Postgres 16 real:
@@ -109,6 +121,18 @@ En esta sesión, en local, con Postgres 16 real:
 | Lectura en voz alta audible | Se verificó la respuesta `audio/wav`, no el sonido |
 
 ## Pendiente
+
+**Para dejar Nyvo funcionando (lo hace el dueño; los pasos detallados están en el README):**
+1. **Base de datos:** en Vercel → Storage → Neon (la integración ya está instalada) → crear base de datos «nyvo» y conectarla al proyecto `nyvo-ainova`. Vercel inyecta `DATABASE_URL` solo.
+2. **Google Cloud:** crear el cliente OAuth y poner `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en Vercel.
+3. **Notion:** crear la integración con la cuenta de la empresa, la página «Nyvo», y poner `NOTION_TOKEN` y `NOTION_ROOT_PAGE_ID` en Vercel.
+4. **Gemini:** poner `GEMINI_API_KEY` y elegir `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE`.
+5. **GitHub:** copiar `CRON_SECRET` desde Vercel a GitHub → Settings → Secrets → Actions, y crear la variable `NYVO_URL` con `https://nyvo-ainova.vercel.app`.
+6. **Contraseña del dueño** (opcional si solo entras con Google): `npm run owner:password`.
+7. Fusionar el PR y redesplegar: las migraciones se aplican solas en el build.
+8. Fase 1b en AINova: prompt listo en [`PROMPT-AINOVA-FASE-1B.md`](PROMPT-AINOVA-FASE-1B.md).
+
+**Siguientes fases:**
 
 - **Fase 1b (repositorio AINOVA-System):** aceptar `NYVO_TOKEN` además de `EDDIE_TOKEN` en `src/adapters/mcp/handler.ts`, registrar quién llamó en `audit_log`, añadir un botón «Abrir Nyvo» en el panel y actualizar `docs/MAP.md`. Requiere acceso de escritura a ese repositorio.
 - **Fase 2:**

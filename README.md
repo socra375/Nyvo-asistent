@@ -72,14 +72,17 @@ El usuario de `TEST_DATABASE_URL` debe poder crear bases de datos (crea `nyvo_e2
 `socra375/nyvo-asistent`. La CI (`.github/workflows/ci.yml`) corre lint, pruebas, build, auditoría y Playwright en cada PR.
 
 ### 2. Neon (base de datos propia de Nyvo)
-1. Crea un proyecto **nuevo** «nyvo» en Neon (no reutilices el de AINova: Nyvo nunca toca la base de AINova).
-2. Copia la cadena de conexión *pooled* en `DATABASE_URL`.
+1. En Vercel → **Storage** → Neon (la integración ya está instalada en el equipo, plan gratuito) → **Create database** «nyvo» y conéctala al proyecto `nyvo-ainova`. Vercel inyecta `DATABASE_URL` en las variables.
+   Si no usas la integración de Vercel: crea un proyecto **nuevo** en Neon y copia la cadena de conexión *pooled* en `DATABASE_URL`. No reutilices la base de AINova: Nyvo nunca la toca.
 3. Las migraciones se aplican solas en cada despliegue (`npm run vercel-build`). Para aplicarlas a mano: `npm run migrate`.
 
 ### 3. Vercel
-1. Importa el repositorio como proyecto nuevo («nyvo»). Vercel detecta `vercel.json`: compila la web en `dist/` y despliega `api/index.ts` (60 s).
-2. En **Settings → Environment Variables** añade las variables de [`.env.example`](.env.example).
-3. Tras el primer despliegue, pon la URL final en `APP_URL` (p. ej. `https://nyvo-ainova.vercel.app`) y redespliega.
+**Ya creado:** proyecto `nyvo-ainova` en el equipo Architec WebS, con la URL `https://nyvo-ainova.vercel.app`, Node 22.x, y las variables `NYVO_OWNER_EMAIL`, `AINOVA_MCP_URL`, `APP_URL`, `NYVO_ENC_KEY` y `CRON_SECRET`. Faltan las demás de [`.env.example`](.env.example) a medida que haces los pasos siguientes.
+
+Si lo montas desde cero:
+1. Importa el repositorio como proyecto nuevo. Vercel detecta `vercel.json`: compila la web en `dist/` y despliega `api/index.ts` (60 s).
+2. En **Settings → Deployment Protection** deja «Vercel Authentication» solo para *Preview*; si protege producción, bloquea el retorno de Google y el disparador de GitHub Actions.
+3. En **Settings → Environment Variables** añade las variables de [`.env.example`](.env.example) y pon la URL final en `APP_URL`.
 4. Define la contraseña del dueño (opcional si solo entras con Google), desde tu equipo con la `DATABASE_URL` de Neon:
    `DATABASE_URL=... NYVO_OWNER_EMAIL=... npm run owner:password`
 
@@ -106,7 +109,7 @@ El usuario de `TEST_DATABASE_URL` debe poder crear bases de datos (crea `nyvo_e2
 3. Alternativa de voz: `VOICE_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`.
 
 ### 8. Trabajos en segundo plano
-1. Genera `CRON_SECRET` y ponlo en Vercel **y** en GitHub (Settings → Secrets → Actions).
+1. `CRON_SECRET` ya está en Vercel (Settings → Environment Variables → CRON_SECRET → mostrar). Copia **el mismo valor** a GitHub (Settings → Secrets and variables → Actions → New repository secret).
 2. En GitHub → Settings → Variables → Actions crea `NYVO_URL` con la URL de Nyvo.
 3. `.github/workflows/jobs-tick.yml` procesará la cola cada 10 minutos.
 
