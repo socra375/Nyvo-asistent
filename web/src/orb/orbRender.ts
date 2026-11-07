@@ -1,107 +1,139 @@
-import { SECTIONS, SECTION_CENTER, SECTION_RGB, project, sectionWeights, type Dynamics, type Hemi, type Particle, type Projected } from './orbModel';
+import { SECTIONS, SECTION_RGB, project, type Dynamics, type Graph, type Projected, type RGB } from './orbModel';
 
-const GOLD = [255, 214, 120] as const;
-const scratch: Projected = { sx: 0, sy: 0, depth: 0, angle: 0 };
-const rgba = (r: number, g: number, b: number, a: number) => `rgba(${r | 0},${g | 0},${b | 0},${a.toFixed(3)})`;
+const scratch: Projected = { sx: 0, sy: 0, depth: 0 };
+const rgba = (c: RGB, a: number) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+const TEAL: RGB = [70, 190, 200];
 
-/** Anillos discontinuos que giran a distinta velocidad y en sentidos opuestos, como en la referencia. */
-const RINGS = [
-  { r: 1.16, dash: [2, 9], speed: 1.0, width: 1.2, alpha: 0.55 },
-  { r: 1.34, dash: [16, 10], speed: -0.65, width: 1.0, alpha: 0.4 },
-  { r: 1.54, dash: [1, 7], speed: 0.4, width: 1.4, alpha: 0.3 }
-] as const;
+// Posiciones proyectadas en píxeles (se reutilizan entre fotogramas).
+let PX = new Float32Array(0), PY = new Float32Array(0), PZ = new Float32Array(0);
 
-/** Dibuja un fotograma del orbe. w y h en píxeles CSS (el contexto ya está escalado por el DPR). */
-export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dynamics, particles: readonly Particle[]): void {
+/** Dibuja un fotograma del grafo. w y h en píxeles CSS (el contexto ya está escalado por el DPR). */
+export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dynamics, g: Graph): void {
   c.clearRect(0, 0, w, h);
   const cx = w / 2, cy = h / 2;
-  const R = Math.min(w, h) * 0.285;
-  const unit = R / 160;
+  const S = Math.min(w / 2.06, h / 1.62);   // píxeles por unidad de escena
+  const U = S / 300;                       // escala de tamaños de puntos y texto
+  const n = g.nodes.length;
+  if (PX.length < n) { PX = new Float32Array(n); PY = new Float32Array(n); PZ = new Float32Array(n); }
+  for (let i = 0; i < n; i++) {
+    project(g.nodes[i]!, d, scratch);
+    PX[i] = cx + scratch.sx * S; PY[i] = cy + scratch.sy * S; PZ[i] = scratch.depth;
+  }
 
-  // Halo general
-  c.globalCompositeOperation = 'lighter';
-  const halo = c.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.9);
-  halo.addColorStop(0, rgba(...GOLD, 0.10 + d.glow * 0.08));
-  halo.addColorStop(1, rgba(...GOLD, 0));
-  c.fillStyle = halo;
+  // Brillo turquesa del centro
+  const pulse = 0.5 + 0.5 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz);
+  const glowR = S * (0.46 + 0.05 * pulse * d.glow + d.level * 0.18);
+  const glow = c.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  glow.addColorStop(0, rgba(TEAL, 0.26 + d.glow * 0.12));
+  glow.addColorStop(0.55, rgba([40, 120, 140], 0.14 + d.glow * 0.05));
+  glow.addColorStop(1, rgba([40, 120, 140], 0));
+  c.fillStyle = glow;
   c.fillRect(0, 0, w, h);
 
-  // Anillos discontinuos
-  for (const ring of RINGS) {
+  // Elipses tenues alrededor, como órbitas que giran despacio
+  c.lineWidth = 1;
+  for (let k = 0; k < 3; k++) {
     c.save();
     c.translate(cx, cy);
-    c.rotate(d.ringPhase * ring.speed + d.clock * 0.02 * ring.speed);
-    c.setLineDash(ring.dash.map(v => v * unit * 1.6));
-    c.lineWidth = ring.width * Math.max(1, unit * 1.4);
-    c.strokeStyle = rgba(...GOLD, ring.alpha * (0.6 + d.glow * 0.5));
+    c.rotate(-0.25 + k * 0.5 + d.yaw * 0.05 * (k % 2 ? -1 : 1));
+    c.strokeStyle = `rgba(190, 215, 230, ${0.05 + k * 0.012})`;
     c.beginPath();
-    c.arc(0, 0, R * ring.r, 0, Math.PI * 2);
+    c.ellipse(0, 0, S * (1.04 + k * 0.05), S * (0.72 + k * 0.05), 0, 0, Math.PI * 2);
     c.stroke();
     c.restore();
   }
-  c.setLineDash([]);
 
-  // Divisiones de las cuatro secciones (cruz fina) y arco brillante de la sección activa sobre el anillo exterior
-  c.strokeStyle = rgba(...GOLD, 0.16);
-  c.lineWidth = 1;
+  // Aristas: todas en gris azulado muy fino; las de la sección que trabaja se encienden con su color
+  c.lineWidth = Math.max(0.5, 0.7 * U * 1.3);
+  c.strokeStyle = 'rgba(160, 185, 205, 0.075)';
   c.beginPath();
-  c.moveTo(cx - R * 1.62, cy); c.lineTo(cx + R * 1.62, cy);
-  c.moveTo(cx, cy - R * 1.62); c.lineTo(cx, cy + R * 1.62);
+  for (const [a, b] of g.edges) { c.moveTo(PX[a]!, PY[a]!); c.lineTo(PX[b]!, PY[b]!); }
   c.stroke();
   for (const s of SECTIONS) {
     const a = d.act[s];
-    if (a < 0.25) continue;
-    const [r, g, b] = SECTION_RGB[s];
-    const mid = SECTION_CENTER[s];
-    c.strokeStyle = rgba(r, g, b, Math.min(0.95, (a - 0.2) * 1.1));
-    c.lineWidth = Math.max(2, unit * 3);
-    c.lineCap = 'round';
+    if (a < 0.2) continue;
+    c.strokeStyle = rgba(SECTION_RGB[s], 0.08 + a * 0.36);
+    c.lineWidth = Math.max(0.6, 0.9 * U * 1.3);
     c.beginPath();
-    c.arc(cx, cy, R * 1.74, mid - Math.PI / 4 + 0.08, mid + Math.PI / 4 - 0.08);
+    // Solo las aristas internas del clúster: los puentes largos entre secciones no se encienden (se verían como una telaraña).
+    for (const e of g.edgesBySec[s]) { const [p, q] = g.edges[e]!; if (g.nodes[q]!.sec !== s) continue; c.moveTo(PX[p]!, PY[p]!); c.lineTo(PX[q]!, PY[q]!); }
     c.stroke();
   }
 
-  // Cuerpo de la esfera: velo dorado con borde más claro, para que lea como esfera y no como una nube
-  const body = c.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.08);
-  body.addColorStop(0, rgba(...GOLD, 0.05));
-  body.addColorStop(0.8, rgba(...GOLD, 0.07 + d.glow * 0.04));
-  body.addColorStop(0.96, rgba(...GOLD, 0.22 + d.glow * 0.1));
-  body.addColorStop(1, rgba(...GOLD, 0));
-  c.fillStyle = body;
-  c.beginPath(); c.arc(cx, cy, R * 1.08, 0, Math.PI * 2); c.fill();
+  // Señales que viajan por las aristas
+  for (const p of d.pulses) {
+    const [a, b] = g.edges[p.edge]!;
+    const t = p.dir === 1 ? p.t : 1 - p.t;
+    const x = PX[a]! + (PX[b]! - PX[a]!) * t, y = PY[a]! + (PY[b]! - PY[a]!) * t;
+    const fade = Math.sin(Math.PI * p.t);
+    c.fillStyle = rgba(SECTION_RGB[p.sec], 0.15 + 0.8 * fade);
+    c.beginPath(); c.arc(x, y, Math.max(1.4, 2.2 * U * 1.3), 0, Math.PI * 2); c.fill();
+  }
 
-  // Partículas: primero las de atrás, luego las de delante
+  // Nodos: primero los de atrás (más tenues), luego los de delante
   for (let pass = 0; pass < 2; pass++) {
-    for (const p of particles) {
-      project(p, d, scratch);
-      const front = scratch.depth >= 0;
-      if (front !== (pass === 1)) continue;
-      const wts = sectionWeights(scratch.angle);
-      let r = 0, g = 0, b = 0, act = 0;
-      for (const s of SECTIONS) {
-        const wt = wts[s as Hemi];
-        const col = SECTION_RGB[s];
-        r += col[0] * wt; g += col[1] * wt; b += col[2] * wt;
-        act += d.act[s] * wt;
+    for (let i = 0; i < n; i++) {
+      const nd = g.nodes[i]!;
+      const z = PZ[i]!;
+      if ((z >= 0) !== (pass === 1)) continue;
+      const act = d.act[nd.sec];
+      const depth01 = (z + 1) / 2;
+      const alpha = (0.5 + 0.5 * depth01) * Math.min(1, 0.85 + 0.6 * act);
+      const size = nd.size * U * (0.62 + 0.55 * depth01) * (1 + 0.45 * act) * 1.15;
+      const x = PX[i]!, y = PY[i]!;
+      if (nd.label || nd.size > 4) {   // halo suave de los hubs
+        c.fillStyle = rgba(nd.rgb, (0.05 + 0.2 * act) * alpha);
+        c.beginPath(); c.arc(x, y, size * 1.9, 0, Math.PI * 2); c.fill();
       }
-      const depth01 = (scratch.depth + 1) / 2;
-      const alpha = Math.min(1, (0.30 + 0.70 * depth01) * (0.55 + 0.75 * act) * (0.85 + 0.15 * Math.sin(d.clock * 2 + p.seed)));
-      const size = p.size * unit * 1.45 * (0.7 + 0.6 * depth01) * (1 + act * 0.5 + d.level * 0.4);
-      const x = cx + scratch.sx * R, y = cy + scratch.sy * R;
-      c.fillStyle = rgba(r, g, b, alpha);
-      if (size < 1.3) c.fillRect(x - size / 2, y - size / 2, Math.max(1, size), Math.max(1, size));
-      else { c.beginPath(); c.arc(x, y, size / 2 + 0.2, 0, Math.PI * 2); c.fill(); }
+      c.fillStyle = rgba(nd.rgb, alpha);
+      if (size < 1.5) c.fillRect(x - size / 2, y - size / 2, Math.max(1, size), Math.max(1, size));
+      else { c.beginPath(); c.arc(x, y, size / 2 + 0.3, 0, Math.PI * 2); c.fill(); }
     }
   }
 
-  // Núcleo luminoso: late más rápido al pensar y se ensancha con la voz
-  const pulse = 0.5 + 0.5 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz);
-  const coreR = R * (0.20 + 0.07 * pulse * d.glow + d.level * 0.16);
-  const core = c.createRadialGradient(cx, cy, 0, cx, cy, coreR * 1.8);
-  core.addColorStop(0, rgba(255, 250, 220, Math.min(1, 0.6 + d.glow * 0.35 + d.level * 0.3)));
-  core.addColorStop(0.35, rgba(255, 214, 120, 0.28 + d.glow * 0.2));
-  core.addColorStop(1, rgba(255, 190, 80, 0));
-  c.fillStyle = core;
-  c.beginPath(); c.arc(cx, cy, coreR * 1.8, 0, Math.PI * 2); c.fill();
-  c.globalCompositeOperation = 'source-over';
+  // Etiquetas de los hubs (blanco con contorno oscuro, como la referencia); solo los que miran hacia delante
+  c.font = `${Math.max(9, Math.round(10 * U * 1.2))}px Inter, system-ui, sans-serif`;
+  c.textBaseline = 'middle';
+  c.lineJoin = 'round';
+  // Sin solapes: cada etiqueta se dibuja solo si no pisa a otra ni al núcleo (las más activas primero).
+  const boxes: [number, number, number, number][] = [[cx - S * 0.12, cy - S * 0.12, S * 0.24, S * 0.24]];
+  const order = [...g.hubs].sort((a, b) => d.act[g.nodes[b]!.sec] - d.act[g.nodes[a]!.sec] || PZ[b]! - PZ[a]!);
+  for (const i of order) {
+    const nd = g.nodes[i]!;
+    const z = PZ[i]!;
+    if (!nd.label || z < -0.25) continue;
+    const act = d.act[nd.sec];
+    const a = Math.min(1, (z + 0.25) * 1.3) * (0.72 + 0.28 * act);
+    const size = nd.size * U * 1.15;
+    const tw = c.measureText(nd.label).width, th = 14 * U * 1.2;
+    const box: [number, number, number, number] = [PX[i]! + size + 3, PY[i]! - th / 2, tw + 2, th];
+    if (boxes.some(o => box[0] < o[0] + o[2] && box[0] + box[2] > o[0] && box[1] < o[1] + o[3] && box[1] + box[3] > o[1])) continue;
+    boxes.push(box);
+    c.lineWidth = 3;
+    c.strokeStyle = `rgba(2, 8, 14, ${0.75 * a})`;
+    c.strokeText(nd.label, PX[i]! + size + 4, PY[i]!);
+    c.fillStyle = `rgba(255, 255, 255, ${0.92 * a})`;
+    c.fillText(nd.label, PX[i]! + size + 4, PY[i]!);
+  }
+
+  // Ondas desde el núcleo cuando hay voz
+  for (const wv of d.waves) {
+    c.strokeStyle = rgba(TEAL, wv.a * 0.5);
+    c.lineWidth = 1.5;
+    c.beginPath(); c.arc(cx, cy, wv.r * S, 0, Math.PI * 2); c.stroke();
+  }
+
+  // Núcleo: anillo, arco que gira y punto central rosa
+  const cr = S * 0.045;
+  c.strokeStyle = rgba([150, 240, 235], 0.85);
+  c.lineWidth = Math.max(1, 1.3 * U * 1.3);
+  c.beginPath(); c.arc(cx, cy, cr, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = rgba(TEAL, 0.7);
+  c.setLineDash([3 * U * 1.3, 4 * U * 1.3]);
+  c.beginPath(); c.arc(cx, cy, cr * 1.65, d.ringPhase, d.ringPhase + Math.PI * 2); c.stroke();
+  c.setLineDash([]);
+  c.strokeStyle = rgba([200, 255, 250], 0.9);
+  c.beginPath(); c.arc(cx, cy, cr * 2.3, d.ringPhase * 1.4, d.ringPhase * 1.4 + 1.1 + d.level); c.stroke();
+  c.fillStyle = rgba([240, 100, 160], 0.95);
+  c.beginPath(); c.arc(cx, cy, cr * (0.36 + 0.25 * pulse * d.glow + d.level * 0.5), 0, Math.PI * 2); c.fill();
 }

@@ -1,6 +1,6 @@
 # Voz y orbe de Nyvo
 
-La pantalla principal es **solo el orbe**: una esfera de partículas doradas que gira, dividida en cuatro secciones fijas que son los hemisferios del cerebro de Nyvo. El panel completo (clientes, Drive, Notion, trabajos, chat) está a un toque en «Panel».
+La pantalla principal es **solo el orbe**: un grafo de red en 3D que se balancea y respira, cuyos cuatro clústeres son los hemisferios del cerebro de Nyvo (diseñado a partir de la referencia que dio el dueño: borde naranja denso a la izquierda, nodos azules a la derecha, rosa en el centro, núcleo turquesa con anillo). El panel completo (clientes, Drive, Notion, trabajos, chat) está a un toque en «Panel».
 
 ## El cerebro vive dentro de Nyvo
 - `brain/nyvo_core_system.md` es el documento del cerebro (copia exacta del que entregó el dueño). Se incrusta al compilar (`npm run build:brain` → `server/agents/brain.generated.ts`), así que no depende de archivos en tiempo de ejecución. Una prueba falla si el `.md` y la copia generada difieren.
@@ -12,9 +12,9 @@ La pantalla principal es **solo el orbe**: una esfera de partículas doradas que
 - Hemisferios ↔ herramientas reales: Rose = conversaciones de AINova; Johan = clientes, proyectos, cobros y facturas; Mia = agenda y formularios (Google Calendar/Forms llegan en la fase 3: la sección existe, aún sin herramientas); Nyvo = Notion, Drive y memoria.
 
 ## Las cuatro secciones
-Fijas en pantalla (arriba-izquierda Rose, arriba-derecha Johan, abajo-derecha Mia, abajo-izquierda Nyvo) con mezcla suave de color en las fronteras; la esfera gira *a través* de ellas. Una sección se enciende (arco brillante, etiqueta iluminada) cuando su hemisferio trabaja: el servidor emite eventos por `POST /api/chat/stream` (NDJSON: `pensando`, `hemisferio {id, estado}`, `fin`/`error`). Pensando sin herramienta, el brillo recorre las cuatro secciones.
+Cada hemisferio es un clúster con su color: **Johan** naranja (casquete denso en filas curvas, a la izquierda), **Mia** azul (derecha), **Rose** rosa (centro) y **Nyvo** amarillo, turquesa y lavanda (los hubs). Los *hubs* grandes llevan el nombre de lo que conectan (Clientes, Cobros, Agenda, Notion, Drive, Memoria…): son la estructura, no datos del negocio. El balanceo en 3D (`SWING`) mantiene la composición de la referencia en todo momento en lugar de dar vueltas completas. Una sección se enciende (sus nodos y aristas internas brillan y sus señales viajan por la red) cuando su hemisferio trabaja: el servidor emite eventos por `POST /api/chat/stream` (NDJSON: `pensando`, `hemisferio {id, estado}`, `fin`/`error`). Pensando sin herramienta, el brillo recorre los cuatro clústeres.
 
-Estados: **reposo** (giro lento), **escuchando** (reacciona al micrófono), **pensando** (giro y anillos rápidos), **hablando** (la voz de Nyvo empuja las partículas). Con `prefers-reduced-motion` el giro y los pulsos se atenúan; en pantallas pequeñas hay menos partículas.
+Estados: **reposo** (balanceo lento), **escuchando** (ondas desde el núcleo con tu voz), **pensando** (más rápido, muchas señales por las aristas), **hablando** (la voz de Nyvo empuja los nodos y lanza ondas). Con `prefers-reduced-motion` el movimiento, las señales y las ondas se atenúan; en pantallas pequeñas hay menos nodos. Un dibujo no es una captura: parecerse «exactamente» a la referencia es una aproximación, no una copia píxel a píxel.
 
 ## Conversación por voz (manos libres)
 ```
@@ -34,6 +34,6 @@ inactivo ─tocar→ escuchando ─frase→ pensando ─respuesta→ hablando �
 Este diseño es por turnos (STT → texto → TTS por frases). La latencia hasta el primer sonido es la suma de: cierre de frase (0,75 s) + transcripción + el modelo + primera síntesis. **No está medida con servicios reales** (la sesión de desarrollo no llega a Gemini), y lo normal será de 2 a 4 s, no menos de 1 s. Para bajar de 1 s de verdad hace falta la **API Live de Gemini** por WebSocket (audio en ambos sentidos con VAD del lado del servidor); es una fase aparte porque exige un canal persistente que las funciones de Vercel (60 s) no ofrecen y un token efímero por sesión para no exponer la clave.
 
 ## Lo probado y lo no probado
-- **Pruebas unitarias** (VAD con señales sintéticas, WAV, pre-roll, troceado, cola con prefetch y corte inmediato, máquina de estados, geometría y dinámica del orbe) y de servidor (cerebro sincronizado, prompt, hemisferios, NDJSON, datos personales).
-- **Chromium real** con un WAV como micrófono falso (dos frases; la segunda cae sobre la voz de Nyvo): escucha → transcribe → responde con datos → habla → se deja interrumpir → vuelve a responder. También: el canvas se pinta (dorado), gira, las cuatro secciones, una acción con tarjeta sin ejecutarse hasta confirmar, y móvil sin desplazamiento.
+- **Pruebas unitarias** (VAD con señales sintéticas, WAV, pre-roll, troceado, cola con prefetch y corte inmediato, máquina de estados, grafo, geometría y dinámica del orbe) y de servidor (cerebro sincronizado, prompt, hemisferios, NDJSON, datos personales).
+- **Chromium real** con un WAV como micrófono falso (dos frases; la segunda cae sobre la voz de Nyvo): escucha → transcribe → responde con datos → habla → se deja interrumpir → vuelve a responder. También: el canvas se pinta con los colores naranja, azul y rosa, se mueve, las cuatro secciones, una acción con tarjeta sin ejecutarse hasta confirmar, y móvil sin desplazamiento.
 - **No probado:** micrófono y altavoces reales, el eco real (el micrófono falso no oye la voz de Nyvo, así que la cancelación de eco y los umbrales de interrupción hay que afinarlos en un equipo real), Gemini real, rendimiento del canvas en móviles reales.

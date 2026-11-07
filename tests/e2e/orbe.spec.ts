@@ -14,16 +14,23 @@ async function loginOrb(page: Page) {
   await expect(page.getByTestId('orbscreen')).toBeVisible();
 }
 
-/** Píxeles con color en el canvas: demuestra que el orbe se dibuja de verdad (no solo que existe el elemento). */
+/** Píxeles con color en el canvas: demuestra que el orbe se dibuja de verdad y con los colores de cada sección. */
 const paintedPixels = (page: Page) => page.getByTestId('orb-canvas').evaluate((c: HTMLCanvasElement) => {
   const g = c.getContext('2d')!;
   const d = g.getImageData(0, 0, c.width, c.height).data;
-  let n = 0, warm = 0;
-  for (let i = 0; i < d.length; i += 4) if (d[i + 3]! > 20) { n++; if (d[i]! > d[i + 2]! + 30) warm++; }
-  return { n, warm, total: d.length / 4 };
+  let n = 0, orange = 0, blue = 0, pink = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i]!, gr = d[i + 1]!, b = d[i + 2]!;
+    if (d[i + 3]! < 60) continue;
+    n++;
+    if (r > 150 && gr > 90 && gr < 190 && b < 130) orange++;
+    else if (b > 140 && b > r + 40) blue++;
+    else if (r > 150 && b > 90 && gr < 130) pink++;
+  }
+  return { n, orange, blue, pink, total: d.length / 4 };
 });
 
-test('orbe: es la pantalla principal, con cuatro secciones, dorado y girando', async ({ page }) => {
+test('orbe: es la pantalla principal, con cuatro secciones, grafo de red y en movimiento', async ({ page }) => {
   await loginOrb(page);
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
   for (const s of ['rose', 'johan', 'mia', 'nyvo']) await expect(page.getByTestId(`sec-${s}`)).toBeVisible();
@@ -34,10 +41,13 @@ test('orbe: es la pantalla principal, con cuatro secciones, dorado y girando', a
   await expect(page.getByRole('tablist')).toHaveCount(0);
 
   const px = await paintedPixels(page);
-  expect(px.n).toBeGreaterThan(5000);
-  expect(px.warm / px.n).toBeGreaterThan(0.6);          // paleta dorada
+  expect(px.n).toBeGreaterThan(8000);
+  // Los tres clústeres grandes se ven con su color: naranja (Johan), azul (Mia) y rosa (Rose).
+  expect(px.orange).toBeGreaterThan(150);
+  expect(px.blue).toBeGreaterThan(100);
+  expect(px.pink).toBeGreaterThan(60);
 
-  // Giro: el ángulo avanza y los fotogramas cambian.
+  // Movimiento: la fase avanza y los fotogramas cambian.
   const yaw = () => page.getByTestId('orb-canvas').getAttribute('data-yaw').then(Number);
   const a = await yaw();
   const shotA = await page.getByTestId('orb-canvas').screenshot();
