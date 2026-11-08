@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { closeAllDbs, type Db } from '../../server/db/pool.js';
 import { createFailover, isEngineFault, type Engine } from '../../server/llm/failover.js';
 import { createOpenAiCompat, toOpenAiMessages, toOpenAiTools } from '../../server/llm/openai-compat.js';
-import { anyEngineConfigured, buildLlm, engineOrder } from '../../server/llm/build.js';
+import { anyEngineConfigured, buildLlm, engineOrder, modelsOf, ENGINES } from '../../server/llm/build.js';
 import { LlmHttpError, type Llm, type LlmRequest, type Turn } from '../../server/llm/types.js';
 import { loadConfig } from '../../server/config.js';
 import { runTurn } from '../../server/agents/main.js';
@@ -207,6 +207,14 @@ describe('construcción de la rotación desde las variables', () => {
     const l = buildLlm(cfg({ GROQ_API_KEY: 'k', GROQ_MODEL: 'm', GEMINI_API_KEY: 'k', GEMINI_MODEL: 'g', LLM_PROVIDERS: 'groq,gemini' }), fetch)!;
     assert.deepEqual(l.status!().map(s => s.name), ['groq', 'gemini']);
     assert.ok(JSON.stringify(l.status!()).indexOf('"k"') < 0, 'el estado no incluye claves');
+  });
+  test('varios modelos por proveedor: lista con comas, sin repetidos ni vacíos, cada uno es un motor', () => {
+    const groq = ENGINES.find(e => e.name === 'groq')!;
+    assert.deepEqual(modelsOf({ GROQ_MODEL: ' a , b,,a ,c ' }, groq), ['a', 'b', 'c']);
+    assert.deepEqual(modelsOf({}, groq), []);
+    assert.equal(anyEngineConfigured({ GROQ_API_KEY: 'k', GROQ_MODEL: ' , ' }), false, 'lista vacía: no cuenta');
+    const l = buildLlm(cfg({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'g1,g2', GROQ_API_KEY: 'k', GROQ_MODEL: 'solo' }), fetch)!;
+    assert.deepEqual(l.status!().map(s => `${s.name}|${s.model}`), ['gemini:g1|g1', 'gemini:g2|g2', 'groq|solo']);
   });
 });
 
