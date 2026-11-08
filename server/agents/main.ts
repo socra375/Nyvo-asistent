@@ -124,6 +124,14 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
     clearTimeout(budgetTimer);
   }
 
+  const st = timed.stats();
+  // Ningún motor llegó a responder: decirlo claro (con el motivo) en vez del genérico «no alcancé a terminar».
+  const noEngine = partial && !reply && st.ok === 0;
+  if (noEngine) {
+    const engines = deps.llm.status?.() ?? [];
+    const why = st.lastError ?? engines.find(e => e.lastError)?.lastError ?? 'sin respuesta';
+    reply = `El motor de IA no respondió a tiempo (${why}). Suele ser sobrecarga o un modelo mal configurado: revisa GEMINI_MODEL o activa un segundo motor (GROQ_MODEL). Inténtalo de nuevo en un momento.`;
+  }
   if (!reply) reply = partial ? 'No alcancé a terminar todo dentro del tiempo de esta petición. Lo que quedó pendiente puedes pedírmelo de nuevo o en segundo plano.' : 'Listo.';
   if (jobIds.length) deps.defer(import('../jobs/tick.js').then(m => m.runTick(deps)));
   await addMessage(deps.db, p.userId, conv.id, 'assistant', reply, cards.map(c => c.id));
