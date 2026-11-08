@@ -24,7 +24,7 @@ Cada integración vive en `connectors/<id>/` y exporta un `Connector` (`connecto
 | `google-drive` · Google Drive | Documentos | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NYVO_ENC_KEY` + permiso `drive.metadata.readonly` | `archivos_principales`, `buscar_archivos` | No (solo metadatos) |
 | `memoria` · Memoria | Todos | `DATABASE_URL` | `recordar`, `buscar_memoria` | No (base propia) |
 | `gemini` · Gemini | Núcleo | `GEMINI_API_KEY`, `GEMINI_MODEL` | — (motor del agente y transcripción) | — |
-| `voz` · Voz | Núcleo | Gemini: `GEMINI_API_KEY`, `GEMINI_TTS_MODEL`, `GEMINI_TTS_VOICE` · Speechify (`VOICE_PROVIDER=speechify`): `SPEECHIFY_API_KEY`, `SPEECHIFY_VOICE_ID` · ElevenLabs (`VOICE_PROVIDER=elevenlabs`): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | — (`/api/voice/tts`, `/api/voice/stt`) | — |
+| `voz` · Voz | Núcleo | Escucha: `GROQ_API_KEY` (Whisper) o, sin ella, Gemini · Síntesis: Gemini: `GEMINI_API_KEY`, `GEMINI_TTS_MODEL`, `GEMINI_TTS_VOICE` · Speechify (`VOICE_PROVIDER=speechify`): `SPEECHIFY_API_KEY`, `SPEECHIFY_VOICE_ID` · ElevenLabs (`VOICE_PROVIDER=elevenlabs`): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | — (`/api/voice/tts`, `/api/voice/stt`) | — |
 
 Variables del núcleo (no de un conector): `DATABASE_URL`, `NYVO_OWNER_EMAIL`, `NYVO_ENC_KEY`, `APP_URL`, `CRON_SECRET`. Detalle y comentarios en [`.env.example`](../.env.example).
 

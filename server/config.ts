@@ -20,6 +20,7 @@ export interface Config {
     googleDrive: string;
     elevenlabs: string;
     speechify: string;
+    groq: string;
   };
   limits: {
     ttsMaxChars: number;
@@ -51,7 +52,8 @@ export function loadConfig(env: Env = process.env): Config {
       googleToken: env.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token',
       googleDrive: env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com',
       elevenlabs: env.ELEVENLABS_API_URL ?? 'https://api.elevenlabs.io',
-      speechify: env.SPEECHIFY_API_URL ?? 'https://api.sws.speechify.com'
+      speechify: env.SPEECHIFY_API_URL ?? 'https://api.sws.speechify.com',
+      groq: (env.GROQ_API_URL ?? 'https://api.groq.com/openai').replace(/\/$/, '')
     },
     limits: {
       ttsMaxChars: int(env.TTS_MAX_CHARS, 1500),

@@ -163,7 +163,7 @@ export function Chat({ setCore, onActivity, notify, refreshKey }: Props) {
         <label htmlFor="chat-input" className="sr-only">Mensaje para Nyvo</label>
         <textarea id="chat-input" rows={1} placeholder="Escribe a Nyvo…" value={text} onChange={e => setText(e.target.value)} onKeyDown={onKey} maxLength={4000} />
         <button type="button" className={`btn icon ${recorder.recording ? 'rec' : ''}`} onClick={listen} disabled={sending || !voice?.stt}
-          aria-label={recorder.recording ? 'Detener grabación' : 'Hablar con Nyvo'} title={voice?.stt ? 'Pulsa para hablar' : 'Falta configurar Gemini para la voz'}>
+          aria-label={recorder.recording ? 'Detener grabación' : 'Hablar con Nyvo'} title={voice?.stt ? 'Pulsa para hablar' : 'Falta configurar la transcripción de voz (GROQ_API_KEY)'}>
           {recorder.recording ? '■' : '🎙'}
         </button>
         <button type="submit" className="btn primary" disabled={sending || !text.trim()}>Enviar</button>

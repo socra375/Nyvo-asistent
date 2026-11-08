@@ -12,6 +12,7 @@ import { loadConfig, missingEnv } from '../../server/config.js';
 import { isSameOriginWrite } from '../../server/http/http.js';
 import { slimResult } from '../../server/actions/actions.js';
 import { migrationPolicy } from '../../server/db/migrate.js';
+import { cleanTranscript, sttMissing, sttProviderFrom } from '../../server/voice/stt.js';
 
 test('cifrado AES-GCM: ida y vuelta, y falla si se altera', () => {
   const key = parseKey(Buffer.alloc(32, 1).toString('base64'))!;
@@ -148,4 +149,22 @@ test('migraciones: en Vercel solo se aplican en producción (las vistas previas 
   assert.equal(migrationPolicy(flag, { VERCEL_ENV: 'development' }).run, false);
   assert.equal(migrationPolicy(flag, {}).run, true, 'fuera de Vercel (local, CI) sí migra');
   assert.equal(migrationPolicy(['node', 'migrate.ts'], { VERCEL_ENV: 'preview' }).run, true, 'sin la bandera no cambia el comportamiento manual');
+});
+
+test('escucha: Groq si hay clave, Gemini si no; STT_PROVIDER manda; faltantes exactos', () => {
+  assert.equal(sttProviderFrom({}), 'gemini');
+  assert.equal(sttProviderFrom({ GROQ_API_KEY: 'k' }), 'groq');
+  assert.equal(sttProviderFrom({ GROQ_API_KEY: 'k', STT_PROVIDER: ' Gemini ' }), 'gemini');
+  assert.equal(sttProviderFrom({ STT_PROVIDER: 'groq' }), 'groq');
+  assert.deepEqual(sttMissing({}), ['GROQ_API_KEY']);
+  assert.deepEqual(sttMissing({ GROQ_API_KEY: 'k' }), []);
+  assert.deepEqual(sttMissing({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'm' }), []);
+  assert.deepEqual(sttMissing({ STT_PROVIDER: 'gemini' }), ['GEMINI_API_KEY', 'GEMINI_MODEL']);
+  assert.deepEqual(sttMissing({ STT_PROVIDER: 'groq' }), ['GROQ_API_KEY']);
+});
+
+test('Whisper: se descartan las frases que inventa con silencio, y se conserva lo que dice el dueño', () => {
+  for (const t of ['Subtítulos realizados por la comunidad de Amara.org', '¡Suscríbete!', 'Gracias por ver el vídeo', 'Subtítulos por Amara.org']) assert.equal(cleanTranscript(t), '', t);
+  for (const t of ['Gracias.', 'muéstrame mis clientes', 'Anota que el proveedor sube precios en enero', 'suscripción de Notion vence mañana']) assert.equal(cleanTranscript(t), t);
+  assert.equal(cleanTranscript('  hola \n  Nyvo  '), 'hola Nyvo');
 });

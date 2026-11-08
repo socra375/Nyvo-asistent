@@ -7,6 +7,7 @@
  * - /google/...         → OAuth de Google (auth + token) y Drive v3 (files.list)
  * - /gemini/v1beta/models/:m:generateContent → Gemini (agente guionizado, TTS y transcripción)
  * - /eleven/v1/text-to-speech/:voice → ElevenLabs
+ * - /groq/openai/v1/audio/transcriptions → Whisper de Groq (multipart; formato supuesto, no verificado con la API real)
  * - /speechify/v1/audio/speech → Speechify (según el formato supuesto en server/voice/tts.ts; no verificado con la API real)
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -323,6 +324,16 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
         return res.end(Buffer.from([0xff, 0xfb, 0x90, 0x00]));
       }
+      if (url.pathname === '/groq/openai/v1/audio/transcriptions') {
+        if (req.headers.authorization !== 'Bearer groq-falso') return send(res, 401, { error: { message: 'Invalid API Key' } });
+        if (!String(req.headers['content-type']).startsWith('multipart/form-data')) return send(res, 400, { error: 'se esperaba multipart' });
+        const raw = await body(req);
+        const has = (n: string) => raw.includes(`name="${n}"`);
+        if (!has('file') || !has('model') || !has('language') || !raw.includes('filename="audio.wav"')) return send(res, 400, { error: 'campos incompletos' });
+        const model = /name="model"\r\n\r\n([^\r]+)/.exec(raw)?.[1], lang = /name="language"\r\n\r\n([^\r]+)/.exec(raw)?.[1];
+        if (/audio-vacio/.test(raw)) return send(res, 200, { text: 'Subtítulos realizados por la comunidad de Amara.org' });
+        return send(res, 200, { text: `hola desde groq (${model}, ${lang})` });
+      }
       if (url.pathname === '/speechify/v1/audio/speech') {
         if (req.headers.authorization !== 'Bearer speechify-falso') return send(res, 401, {});
         const b = JSON.parse(await body(req)) as { input?: string; voice_id?: string; audio_format?: string; model?: string };
@@ -347,7 +358,7 @@ export function upstreamEnv(url: string, state: FakeState): Record<string, strin
     GOOGLE_CLIENT_ID: FAKE_GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: 'secreto-falso',
     GOOGLE_AUTH_URL: `${url}/google/auth`, GOOGLE_TOKEN_URL: `${url}/google/token`, GOOGLE_DRIVE_API_URL: `${url}/google`,
     GEMINI_API_KEY: 'gemini-falso', GEMINI_MODEL: 'modelo-falso', GEMINI_TTS_MODEL: 'tts-falso', GEMINI_TTS_VOICE: 'VozFalsa', GEMINI_API_URL: `${url}/gemini`,
-    ELEVENLABS_API_URL: `${url}/eleven`, SPEECHIFY_API_URL: `${url}/speechify`
+    ELEVENLABS_API_URL: `${url}/eleven`, SPEECHIFY_API_URL: `${url}/speechify`, GROQ_API_URL: `${url}/groq/openai`
   };
 }
 

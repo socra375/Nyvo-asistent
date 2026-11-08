@@ -169,6 +169,35 @@ describe('API HTTP', needsDb, () => {
     assert.equal((await call(deps, 'POST', '/api/voice/stt', { cookie, body: { audio: 'eA==', mimeType: 'text/html' } })).status, 415);
   });
 
+  test('escucha con Whisper de Groq: no necesita Gemini, usa su modelo y español, y descarta alucinaciones', async () => {
+    const groq = makeDeps(db, { ...env, GROQ_API_KEY: 'groq-falso' }, { llm: null });
+    const { cookie } = await loginCookie(groq);
+    const cfg = (await call(groq, 'GET', '/api/voice/config', { cookie })).json();
+    assert.equal(cfg.stt, true);
+    assert.equal(cfg.sttProvider, 'groq');
+    const wav = Buffer.from('RIFF....WAVEdata').toString('base64');
+    const r = await call(groq, 'POST', '/api/voice/stt', { cookie, body: { audio: wav, mimeType: 'audio/wav' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().text, 'hola desde groq (whisper-large-v3-turbo, es)');
+    // Modelo e idioma configurables
+    const custom = makeDeps(db, { ...env, GROQ_API_KEY: 'groq-falso', GROQ_STT_MODEL: 'whisper-large-v3', GROQ_STT_LANGUAGE: 'en' }, { llm: null });
+    assert.equal((await call(custom, 'POST', '/api/voice/stt', { cookie, body: { audio: wav, mimeType: 'audio/wav' } })).json().text, 'hola desde groq (whisper-large-v3, en)');
+    // Frase inventada por Whisper con silencio → texto vacío
+    const silence = Buffer.from('RIFF audio-vacio WAVEdata').toString('base64');
+    assert.equal((await call(groq, 'POST', '/api/voice/stt', { cookie, body: { audio: silence, mimeType: 'audio/wav' } })).json().text, '');
+    // Clave rechazada → 502 sin filtrar la clave
+    const bad = makeDeps(db, { ...env, GROQ_API_KEY: 'clave-mala' }, { llm: null });
+    const e = await call(bad, 'POST', '/api/voice/stt', { cookie, body: { audio: wav, mimeType: 'audio/wav' } });
+    assert.equal(e.status, 502);
+    assert.ok(!e.body.includes('clave-mala'));
+    // Sin ninguna opción: «falta configurar» con la variable exacta
+    const none = makeDeps(db, { ...env, GEMINI_API_KEY: '', GEMINI_MODEL: '', GROQ_API_KEY: '' }, { llm: null });
+    const m = await call(none, 'POST', '/api/voice/stt', { cookie, body: { audio: wav, mimeType: 'audio/wav' } });
+    assert.equal(m.status, 503);
+    assert.match(m.json().error, /GROQ_API_KEY/);
+    assert.equal((await call(none, 'GET', '/api/voice/config', { cookie })).json().stt, false);
+  });
+
   test('chat y tarjetas por HTTP; tick protegido con CRON_SECRET', async () => {
     const deps = makeDeps(db, { ...env, CRON_SECRET: 'secreto-cron-largo' });
     const { cookie } = await loginCookie(deps);
