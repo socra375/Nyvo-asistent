@@ -8,6 +8,9 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function cleanReply(text: string): string {
   let t = text
+    // Restos de una llamada a herramienta escrita como texto: nunca se muestran ni se leen en voz alta
+    .replace(/<function_calls>[\s\S]*?(?:<\/function_calls>|$)/gi, '')
+    .replace(/<\/?(?:function_calls|invoke|parameter)\b[^>]*>/gi, '')
     // Etiquetas del documento del cerebro: «[ROSE]:», «[MIA -> JOHAN]:», «[NYVO]»
     .replace(/\[(?:ROSE|JOHAN|MIA|NYVO)(?:\s*(?:->|→|,|y)\s*(?:ROSE|JOHAN|MIA|NYVO))*\]\s*:?\s*/g, '')
     // Rótulo al empezar una línea: «Johan: tienes…», «Rose – …»

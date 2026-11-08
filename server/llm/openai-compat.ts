@@ -54,6 +54,30 @@ function cleanSchema(s: Schema | undefined): Record<string, unknown> {
 }
 export const toOpenAiTools = (tools: FunctionDecl[]) => tools.map(f => ({ type: 'function' as const, function: { name: f.name, description: f.description, parameters: cleanSchema(f.parameters) } }));
 
+
+const PSEUDO = /<\/?(?:function_calls|invoke|parameter)\b|<\|?tool_call/i;
+/**
+ * Algunos modelos pequeños escriben la llamada a la herramienta COMO TEXTO (`<function_calls><invoke name="…">…`) en vez de usar
+ * `tool_calls`. Si el nombre es una herramienta declarada se convierte en llamada real; el resto del texto se conserva.
+ * Si queda marcado pero no se puede interpretar, devuelve `broken` para que la rotación pruebe otro motor y no se lea en voz alta.
+ */
+export function extractTextToolCalls(text: string, tools: FunctionDecl[] | undefined): { text: string; calls: { name: string; args: Record<string, unknown> }[]; broken: boolean } {
+  if (!PSEUDO.test(text)) return { text, calls: [], broken: false };
+  const known = new Set((tools ?? []).map(t => t.name));
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  const decode = (v: string) => v.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+  let rest = text.replace(/<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/gi, (_m, name: string, inner: string) => {
+    if (known.has(name)) {
+      const args: Record<string, unknown> = {};
+      for (const m of inner.matchAll(/<parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/parameter>/gi)) args[m[1]!] = decode(m[2]!);
+      calls.push({ name, args });
+    }
+    return '';
+  });
+  rest = rest.replace(/<\/?function_calls>/gi, '').trim();
+  return { text: rest, calls, broken: PSEUDO.test(rest) };
+}
+
 export function createOpenAiCompat(o: CompatOpts): Llm {
   return {
     async generate(req: LlmRequest): Promise<LlmResponse> {
@@ -69,13 +93,18 @@ export function createOpenAiCompat(o: CompatOpts): Llm {
       const j = await r.json().catch(() => null) as { choices?: { message?: { content?: string | null; tool_calls?: { function?: { name?: string; arguments?: string } }[] } }[] } | null;
       const msg = j?.choices?.[0]?.message;
       if (!msg) throw new LlmHttpError(`${o.name} no devolvió respuesta.`, 502);
-      const text = (msg.content ?? '').trim();
+      let text = (msg.content ?? '').trim();
       const calls = (msg.tool_calls ?? []).flatMap(c => {
         if (!c.function?.name) return [];
         let args: Record<string, unknown> = {};
         try { const v = JSON.parse(c.function.arguments || '{}'); if (v && typeof v === 'object' && !Array.isArray(v)) args = v as Record<string, unknown>; } catch { /* argumentos mal formados: se llama sin ellos */ }
         return [{ name: c.function.name, args }];
       });
+      if (!calls.length) {
+        const x = extractTextToolCalls(text, req.tools);
+        if (x.broken) throw new LlmHttpError(`${o.name} escribió la llamada a la herramienta como texto.`, 502);
+        text = x.text; calls.push(...x.calls);
+      }
       if (!text && !calls.length) throw new LlmHttpError(`${o.name} devolvió una respuesta vacía.`, 502);
       return { text, calls, parts: [...(text ? [{ text }] : []), ...calls.map(c => ({ functionCall: c }))], engine: o.name };
     },

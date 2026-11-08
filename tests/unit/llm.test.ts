@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { closeAllDbs, type Db } from '../../server/db/pool.js';
 import { createFailover, isEngineFault, type Engine } from '../../server/llm/failover.js';
 import { createOpenAiCompat, toOpenAiMessages, toOpenAiTools } from '../../server/llm/openai-compat.js';
+import { extractTextToolCalls } from '../../server/llm/openai-compat.js';
+import { cleanReply } from '../../server/agents/persona.js';
 import { anyEngineConfigured, buildLlm, engineOrder, modelsOf, ENGINES } from '../../server/llm/build.js';
 import { LlmHttpError, type Llm, type LlmRequest, type Turn } from '../../server/llm/types.js';
 import { loadConfig } from '../../server/config.js';
@@ -193,6 +195,27 @@ describe('motor compatible con OpenAI (Groq, OpenRouter)', () => {
     const base = { name: 'Groq', apiKey: 'k', model: 'm', baseUrl: 'https://x.test/v1' };
     await assert.rejects(createOpenAiCompat({ ...base, fetch: fakeFetch(429, { error: 'cuota' }) }).generate(REQ), (e: unknown) => e instanceof LlmHttpError && e.status === 429);
     await assert.rejects(createOpenAiCompat({ ...base, fetch: fakeFetch(200, { choices: [{ message: { content: '' } }] }) }).generate(REQ), (e: unknown) => e instanceof LlmHttpError && e.status === 502);
+  });
+});
+
+describe('llamadas a herramientas escritas como texto', () => {
+  const tools = [{ name: 'delegar', description: 'd', parameters: { type: 'object' as const, properties: {} } }];
+  const raw = '<function_calls> <invoke name="delegar"> <parameter name="especialista">negocios</parameter> <parameter name="tarea">Listar a Ana &amp; Co</parameter> </invoke> </function_calls>';
+  test('se convierte en llamada real', () => {
+    const x = extractTextToolCalls(raw, tools);
+    assert.deepEqual(x.calls, [{ name: 'delegar', args: { especialista: 'negocios', tarea: 'Listar a Ana & Co' } }]);
+    assert.equal(x.text, ''); assert.equal(x.broken, false);
+  });
+  test('texto normal intacto; herramienta desconocida o marcado roto = broken', () => {
+    assert.deepEqual(extractTextToolCalls('Tienes 2 clientes.', tools), { text: 'Tienes 2 clientes.', calls: [], broken: false });
+    assert.equal(extractTextToolCalls(raw.replace('delegar', 'otra'), tools).broken, false, 'invoke completo ajeno se descarta sin llamada');
+    assert.equal(extractTextToolCalls('Hola <function_calls> <invoke name="delegar">', tools).broken, true);
+  });
+  test('el motor lo trata como llamada real y cleanReply no deja restos', async () => {
+    const llm = createOpenAiCompat({ name: 'X', apiKey: 'k', model: 'm', baseUrl: 'http://x', fetch: (async () => new Response(JSON.stringify({ choices: [{ message: { content: raw } }] }), { status: 200 })) as typeof fetch });
+    const r = await llm.generate({ system: 's', turns: [{ role: 'user', parts: [{ text: 'hola' }] }], tools });
+    assert.equal(r.calls.length, 1); assert.equal(r.calls[0]!.name, 'delegar');
+    assert.equal(cleanReply('Hola <function_calls> <invoke name="x"> texto'), 'Hola');
   });
 });
 
