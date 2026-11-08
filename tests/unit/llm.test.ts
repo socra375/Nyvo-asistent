@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { closeAllDbs, type Db } from '../../server/db/pool.js';
 import { createFailover, isEngineFault, type Engine } from '../../server/llm/failover.js';
 import { createOpenAiCompat, toOpenAiMessages, toOpenAiTools } from '../../server/llm/openai-compat.js';
-import { extractTextToolCalls } from '../../server/llm/openai-compat.js';
+import { extractTextToolCalls, trimTurns } from '../../server/llm/openai-compat.js';
+import { createGemini } from '../../server/llm/gemini.js';
 import { cleanReply } from '../../server/agents/persona.js';
-import { anyEngineConfigured, buildLlm, engineOrder, modelsOf, ENGINES } from '../../server/llm/build.js';
+import { anyEngineConfigured, buildLlm, engineOrder, modelsOf, ENGINES, thinkingBudgetFor } from '../../server/llm/build.js';
 import { LlmHttpError, type Llm, type LlmRequest, type Turn } from '../../server/llm/types.js';
 import { loadConfig } from '../../server/config.js';
 import { runTurn } from '../../server/agents/main.js';
@@ -198,6 +199,48 @@ describe('motor compatible con OpenAI (Groq, OpenRouter)', () => {
   });
 });
 
+describe('ahorro de cuota por petición', () => {
+  const txt = (role: 'user' | 'model', n: number, c = 'x'): Turn => ({ role, parts: [{ text: c.repeat(n) }] });
+  test('trimTurns: recorta lo más antiguo, nunca la petición actual ni deja respuestas de herramienta huérfanas', () => {
+    const old: Turn[] = [txt('user', 4000), txt('model', 4000), txt('user', 4000), txt('model', 4000)];
+    const cur: Turn[] = [txt('user', 200, 'q'), { role: 'model', parts: [{ functionCall: { name: 'delegar', args: {} } }] }, { role: 'user', parts: [{ functionResponse: { name: 'delegar', response: { resultado: 'ok' } } }] }];
+    const out = trimTurns('sistema', [...old, ...cur], 1000);   // ~3500 caracteres de presupuesto
+    assert.deepEqual(out, cur, 'se fue todo el historial y queda la petición con su llamada y su respuesta');
+    assert.equal(out[0]!.role, 'user');
+    const small = [txt('user', 50), txt('model', 50), txt('user', 50)];
+    assert.equal(trimTurns('s', small, 7500), small, 'bajo el tope no se toca nada');
+    const mid = trimTurns('s', [txt('user', 3000), txt('model', 3000), txt('user', 3000), txt('model', 3000), txt('user', 100)], 2000);
+    assert.equal(mid[0]!.role, 'user'); assert.equal((mid.at(-1)!.parts[0] as { text: string }).text.length, 100);
+  });
+  test('Groq: reasoning_effort «low» en gpt-oss, tope de entrada, y se reintenta sin él si el modelo no lo admite', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    let first = true;
+    const f = (async (_u: string, init?: { body?: string }) => {
+      bodies.push(JSON.parse(init!.body!));
+      if (first) { first = false; return new Response('{"error":{"message":"reasoning_effort is not supported with this model"}}', { status: 400 }); }
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'hola' } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const llm = createOpenAiCompat({ name: 'Groq', apiKey: 'k', model: 'openai/gpt-oss-120b', baseUrl: 'http://x', fetch: f, reasoningEffort: 'low', maxInputTokens: 7500 });
+    assert.equal((await llm.generate(REQ)).text, 'hola');
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0]!.reasoning_effort, 'low'); assert.equal('reasoning_effort' in bodies[1]!, false);
+  });
+  test('Gemini Flash: «pensar» apagado por defecto (0), configurable, y se reintenta sin él si el modelo no lo admite', async () => {
+    assert.equal(thinkingBudgetFor({}, 'gemini-flash-lite-latest'), 0);
+    assert.equal(thinkingBudgetFor({}, 'gemini-2.5-pro'), undefined, 'Pro no admite apagarlo');
+    assert.equal(thinkingBudgetFor({ GEMINI_THINKING_BUDGET: '512' }, 'gemini-2.5-pro'), 512);
+    const bodies: { generationConfig: Record<string, unknown> }[] = [];
+    const f = (async (_u: string, init?: { body?: string }) => {
+      bodies.push(JSON.parse(init!.body!));
+      if (bodies.length === 1) return new Response('{"error":{"message":"Thinking budget is not supported for this model"}}', { status: 400 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'listo' }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const r = await createGemini({ apiKey: 'k', model: 'm', baseUrl: 'http://x', fetch: f, thinkingBudget: 0 }).generate(REQ);
+    assert.equal(r.text, 'listo');
+    assert.ok('thinkingConfig' in bodies[0]!.generationConfig); assert.ok(!('thinkingConfig' in bodies[1]!.generationConfig));
+  });
+});
+
 describe('llamadas a herramientas escritas como texto', () => {
   const tools = [{ name: 'delegar', description: 'd', parameters: { type: 'object' as const, properties: {} } }];
   const raw = '<function_calls> <invoke name="delegar"> <parameter name="especialista">negocios</parameter> <parameter name="tarea">Listar a Ana &amp; Co</parameter> </invoke> </function_calls>';
@@ -222,10 +265,11 @@ describe('llamadas a herramientas escritas como texto', () => {
 describe('construcción de la rotación desde las variables', () => {
   const cfg = (env: Record<string, string>) => loadConfig({ NYVO_OWNER_EMAIL: 'a@b.c', ...env });
   test('orden por defecto, LLM_PROVIDERS, nombres desconocidos y motores incompletos', () => {
-    assert.deepEqual(engineOrder({}).map(d => d.name), ['gemini', 'groq', 'openrouter']);
+    assert.deepEqual(engineOrder({}).map(d => d.name), ['gemini', 'groq', 'openrouter', 'cerebras']);
     assert.deepEqual(engineOrder({ LLM_PROVIDERS: ' Groq , gemini, groq, nada ' }).map(d => d.name), ['groq', 'gemini']);
     assert.equal(buildLlm(cfg({}), fetch), null);
-    assert.equal(buildLlm(cfg({ GEMINI_API_KEY: 'k' }), fetch), null, 'clave sin modelo: no cuenta');
+    assert.equal(buildLlm(cfg({ GEMINI_MODEL: 'g' }), fetch), null, 'modelo sin clave: no cuenta');
+    assert.deepEqual(buildLlm(cfg({ GEMINI_API_KEY: 'k' }), fetch)!.status!().map(e => e.model), ['gemini-flash-lite-latest'], 'clave sin modelo: usa el gratuito por defecto');
     assert.equal(anyEngineConfigured({ GROQ_API_KEY: 'k', GROQ_MODEL: 'm' }), true);
     const l = buildLlm(cfg({ GROQ_API_KEY: 'k', GROQ_MODEL: 'm', GEMINI_API_KEY: 'k', GEMINI_MODEL: 'g', LLM_PROVIDERS: 'groq,gemini' }), fetch)!;
     assert.deepEqual(l.status!().map(s => s.name), ['groq', 'gemini']);
@@ -234,8 +278,9 @@ describe('construcción de la rotación desde las variables', () => {
   test('varios modelos por proveedor: lista con comas, sin repetidos ni vacíos, cada uno es un motor', () => {
     const groq = ENGINES.find(e => e.name === 'groq')!;
     assert.deepEqual(modelsOf({ GROQ_MODEL: ' a , b,,a ,c ' }, groq), ['a', 'b', 'c']);
-    assert.deepEqual(modelsOf({}, groq), []);
-    assert.equal(anyEngineConfigured({ GROQ_API_KEY: 'k', GROQ_MODEL: ' , ' }), false, 'lista vacía: no cuenta');
+    assert.deepEqual(modelsOf({}, groq), ['openai/gpt-oss-120b'], 'sin variable: modelo por defecto');
+    assert.deepEqual(modelsOf({ GROQ_MODEL: ' , ' }, groq), ['openai/gpt-oss-120b'], 'lista vacía: también el de por defecto');
+    assert.deepEqual(ENGINES.map(e => e.defaultModel), ['gemini-flash-lite-latest', 'openai/gpt-oss-120b', 'openrouter/free', 'llama-3.3-70b']);
     const l = buildLlm(cfg({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'g1,g2', GROQ_API_KEY: 'k', GROQ_MODEL: 'solo' }), fetch)!;
     assert.deepEqual(l.status!().map(s => `${s.name}|${s.model}`), ['gemini:g1|g1', 'gemini:g2|g2', 'groq|solo']);
   });
@@ -283,9 +328,9 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     assert.equal(s.status, 200);
     const j = s.json();
     assert.equal(j.rotation, true);
-    assert.deepEqual(j.order, ['gemini', 'groq', 'openrouter']);
+    assert.deepEqual(j.order, ['gemini', 'groq', 'openrouter', 'cerebras']);
     assert.deepEqual(j.engines.map((e: { name: string; state: string }) => [e.name, e.state]), [['gemini', 'enfriamiento'], ['groq', 'enfriamiento']]);
-    assert.deepEqual(j.notConfigured, [{ name: 'openrouter', missingEnv: ['OPENROUTER_API_KEY', 'OPENROUTER_MODEL'] }]);
+    assert.deepEqual(j.notConfigured, [{ name: 'openrouter', missingEnv: ['OPENROUTER_API_KEY'] }, { name: 'cerebras', missingEnv: ['CEREBRAS_API_KEY'] }]);
     assert.ok(!r.body.includes('groq-falso') && !s.body.includes('groq-falso'), 'ninguna clave en las respuestas');
     // El flujo en vivo también lo cuenta bien
     const live = await call(deps, 'POST', '/api/chat/stream', { cookie, body: { message: 'hola' }, headers: { origin: 'http://nyvo.test' } });
@@ -336,7 +381,7 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     assert.equal(none.llm, null);
     const j = (await call(none, 'GET', '/api/llm/status', { cookie })).json();
     assert.equal(j.rotation, false); assert.deepEqual(j.engines, []);
-    assert.equal(j.notConfigured.length, 3);
+    assert.equal(j.notConfigured.length, 4);
   });
 });
 
@@ -347,4 +392,29 @@ test('SSL de la base: se escribe verify-full explícito (mismo comportamiento qu
   assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=verify-full'), 'postgres://u:p@h/db?sslmode=verify-full');
   assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=disable'), 'postgres://u:p@h/db?sslmode=disable');
   assert.equal(normalizeSslMode('postgres://u:p@localhost/db'), 'postgres://u:p@localhost/db');
+});
+
+describe('tope de delegaciones por petición', needsDb, () => {
+  let db: Db; let userId: string;
+  before(async () => { db = await freshDb(); userId = await makeUser(db); });
+  after(async () => { await closeAllDbs(); });
+  test('a partir de la 7.ª delegación se responde «tope alcanzado» sin ejecutar más especialistas', async () => {
+    const seen: Turn[][] = [];
+    const llm: Llm = {
+      transcribe: async () => '',
+      async generate(req) {
+        if (req.tools?.some(t => t.name === 'delegar')) {
+          seen.push(req.turns.map(t => t));
+          if (seen.length === 1) { const calls = Array.from({ length: 8 }, () => ({ name: 'delegar', args: { especialista: 'negocios', tarea: 'listar' } })); return { text: '', calls, parts: calls.map(c => ({ functionCall: c })) }; }
+        }
+        return answer('hecho');
+      }
+    };
+    const deps = makeDeps(db, {}, { llm });
+    const r = await runTurn(deps, { userId, conversationId: null, message: 'haz muchas cosas' });
+    assert.equal(r.reply, 'Hecho');
+    const last = seen[1]!.at(-1)!;
+    const errors = last.parts.filter(p => 'functionResponse' in p && /Tope de 6/.test(String((p.functionResponse.response as { error?: string }).error ?? '')));
+    assert.equal(last.parts.length, 8); assert.equal(errors.length, 2);
+  });
 });

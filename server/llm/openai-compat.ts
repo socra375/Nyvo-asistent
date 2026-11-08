@@ -6,7 +6,7 @@ import { LlmHttpError, type FunctionDecl, type Llm, type LlmRequest, type LlmRes
  * a mensajes, de modo que se puede cambiar de motor a mitad de una conversación.
  * El formato sale de lo que se conoce de esa API; NO se ha verificado contra los servicios reales.
  */
-export interface CompatOpts { name: string; apiKey: string; model: string; baseUrl: string; fetch: typeof fetch; headers?: Record<string, string> }
+export interface CompatOpts { name: string; apiKey: string; model: string; baseUrl: string; fetch: typeof fetch; headers?: Record<string, string>; /** Esfuerzo de razonamiento («low» gasta menos cuota; solo modelos que lo admiten). */ reasoningEffort?: 'low' | 'medium' | 'high'; /** Tope aproximado de tokens de entrada por petición: se recortan los mensajes más antiguos. */ maxInputTokens?: number }
 
 type Msg =
   | { role: 'system' | 'user'; content: string }
@@ -78,18 +78,46 @@ export function extractTextToolCalls(text: string, tools: FunctionDecl[] | undef
   return { text: rest, calls, broken: PSEUDO.test(rest) };
 }
 
+const CHARS_PER_TOKEN = 3.5;
+const sizeOf = (t: Turn) => JSON.stringify(t.parts).length;
+const isPlainUser = (t: Turn) => t.role === 'user' && t.parts.every(p => 'text' in p);
+
+/**
+ * Recorta el historial más antiguo para no pasar de ~maxTokens de entrada (sistema + mensajes). Nunca toca la petición actual
+ * (el último mensaje de texto del usuario y todo lo que va después, que incluye las llamadas a herramientas en curso) y el
+ * historial recortado siempre empieza en un mensaje de texto del usuario, para no dejar respuestas de herramientas huérfanas.
+ */
+export function trimTurns(system: string, turns: Turn[], maxTokens: number): Turn[] {
+  const budget = maxTokens * CHARS_PER_TOKEN - system.length;
+  let keepFrom = 0;
+  for (let i = turns.length - 1; i >= 0; i--) if (isPlainUser(turns[i]!)) { keepFrom = i; break; }
+  let total = turns.reduce((n, t) => n + sizeOf(t), 0);
+  let start = 0;
+  while (total > budget && start < keepFrom) {
+    total -= sizeOf(turns[start]!); start++;
+    while (start < keepFrom && !isPlainUser(turns[start]!)) { total -= sizeOf(turns[start]!); start++; }
+  }
+  return start ? turns.slice(start) : turns;
+}
+
 export function createOpenAiCompat(o: CompatOpts): Llm {
   return {
     async generate(req: LlmRequest): Promise<LlmResponse> {
-      const body: Record<string, unknown> = { model: o.model, messages: toOpenAiMessages(req.system, req.turns), temperature: 0.4 };
+      const turns = o.maxInputTokens ? trimTurns(req.system, req.turns, o.maxInputTokens) : req.turns;
+      const body: Record<string, unknown> = { model: o.model, messages: toOpenAiMessages(req.system, turns), temperature: 0.4 };
       if (req.tools?.length) { body.tools = toOpenAiTools(req.tools); body.tool_choice = 'auto'; }
-      const r = await o.fetch(`${o.baseUrl}/chat/completions`, {
+      const post = () => o.fetch(`${o.baseUrl}/chat/completions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${o.apiKey}`, ...o.headers }, body: JSON.stringify(body), signal: req.signal
       });
-      if (!r.ok) {
-        const detail = await r.text().catch(() => '');
-        throw new LlmHttpError(`${o.name} respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, r.status);
+      if (o.reasoningEffort) body.reasoning_effort = o.reasoningEffort;
+      let r = await post();
+      let detail = r.ok ? '' : await r.text().catch(() => '');
+      if (!r.ok && r.status === 400 && body.reasoning_effort && /reasoning/i.test(detail)) {   // el modelo no admite ese parámetro: se reintenta sin él
+        delete body.reasoning_effort;
+        r = await post();
+        detail = r.ok ? '' : await r.text().catch(() => '');
       }
+      if (!r.ok) throw new LlmHttpError(`${o.name} respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, r.status);
       const j = await r.json().catch(() => null) as { choices?: { message?: { content?: string | null; tool_calls?: { function?: { name?: string; arguments?: string } }[] } }[] } | null;
       const msg = j?.choices?.[0]?.message;
       if (!msg) throw new LlmHttpError(`${o.name} no devolvió respuesta.`, 502);

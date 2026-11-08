@@ -6,6 +6,11 @@ import { chunkForSpeech } from './chunker';
 import { stepConversation, type ConvAction, type ConvEvent, type ConvState } from './conversation';
 import { openMic, type Mic } from './capture';
 import { createSpeaker } from './speaker';
+import { browserVoiceSupported, createBrowserSpeaker } from './browserVoice';
+import type { SpeechQueue } from './speechQueue';
+
+/** Lo común de los dos altavoces (servidor y navegador). */
+interface Speaker { queue: Pick<SpeechQueue<unknown>, 'speak' | 'cancel' | 'speaking'>; level(): number }
 
 export type OrbState = 'reposo' | 'escuchando' | 'pensando' | 'hablando';
 export type SectionState = 'reposo' | 'activo' | 'listo';
@@ -70,7 +75,9 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const convId = useRef<string | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const micRef = useRef<Mic | null>(null);
-  const speakerRef = useRef<ReturnType<typeof createSpeaker> | null>(null);
+  const speakerRef = useRef<Speaker | null>(null);
+  /** Altavoz según la voz configurada: la del navegador (VOICE_PROVIDER=navegador, o sin nada configurado) o la del servidor. */
+  const makeSpeaker = (ctx: AudioContext | null) => (voiceRef.current?.provider === 'navegador' ? createBrowserSpeaker() : createSpeaker(ctx!));
   const vad = useRef(new Vad());
   const preroll = useRef<PreRoll | null>(null);
   const utter = useRef<Float32Array[]>([]);
@@ -168,7 +175,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       setCardsState(c => [...c.filter(x => !fin.cards.some(y => y.id === x.id)), ...fin.cards]);
       activity.current();
       const v = voiceRef.current;
-      const canSpeak = o.spoken && !!v && !v.missingEnv.length && !!speakerRef.current;
+      const canSpeak = o.spoken && !!v && !v.missingEnv.length && !!speakerRef.current && (v.provider !== 'navegador' || browserVoiceSupported());
       // Las secciones que trabajaron quedan en «listo» y se apagan solas (READY_FADE_MS).
       const chunks = canSpeak ? chunkForSpeech(fin.reply.slice(0, v!.maxChars)) : [];
       if (o.live) {
@@ -259,7 +266,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.resume();
       ctxRef.current = ctx;
-      speakerRef.current = createSpeaker(ctx);
+      speakerRef.current = makeSpeaker(ctx);
       preroll.current = new PreRoll(Math.round(ctx.sampleRate * 0.5));
       vad.current = new Vad();   // nueva calibración del ruido de fondo
       micRef.current = await openMic(ctx, onBlock);
@@ -280,10 +287,11 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const ensureSpeaker = useCallback(async () => {
     if (speakerRef.current) return;
     try {
+      if (voiceRef.current?.provider === 'navegador') { speakerRef.current = createBrowserSpeaker(); return; }   // la voz del navegador no necesita AudioContext
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.resume();
       ctxRef.current = ctx;
-      speakerRef.current = createSpeaker(ctx);
+      speakerRef.current = makeSpeaker(ctx);
     } catch { /* sin audio: se muestra solo el texto */ }
   }, []);
 

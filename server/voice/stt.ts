@@ -17,8 +17,8 @@ export const sttProvider = (cfg: Config): SttProvider => sttProviderFrom(cfg.env
 export function sttMissing(env: Env): string[] {
   const p = sttProviderFrom(env);
   if (p === 'groq') return env.GROQ_API_KEY ? [] : ['GROQ_API_KEY'];
-  if (env.GEMINI_API_KEY && env.GEMINI_MODEL) return [];
-  return env.STT_PROVIDER?.trim().toLowerCase() === 'gemini' ? ['GEMINI_API_KEY', 'GEMINI_MODEL'].filter(k => !env[k]) : ['GROQ_API_KEY'];
+  if (env.GEMINI_API_KEY) return [];
+  return env.STT_PROVIDER?.trim().toLowerCase() === 'gemini' ? ['GEMINI_API_KEY'] : ['GROQ_API_KEY'];
 }
 
 const EXT: Record<string, string> = { 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/mpeg': 'mp3', 'audio/aac': 'aac' };

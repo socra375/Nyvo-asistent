@@ -171,8 +171,13 @@ describe('API HTTP', needsDb, () => {
     assert.equal(rej.status, 502);
     assert.match(rej.json().error, /Speechify respondió 400: .*texto rechazado por el proveedor/);
     assert.ok(!rej.body.includes('speechify-falso'), 'sin la clave en el mensaje');
-    const noVoice = makeDeps(db, { ...env, GEMINI_TTS_VOICE: '' });
-    assert.equal((await call(noVoice, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 503);
+    const noVoice = makeDeps(db, { ...env, VOICE_PROVIDER: 'gemini', GEMINI_TTS_VOICE: '' });
+    assert.equal((await call(noVoice, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 503, 'Gemini elegido pero incompleto: falta configurar');
+    const browser = makeDeps(db, { ...env, GEMINI_TTS_VOICE: '' });   // sin VOICE_PROVIDER y sin Gemini TTS completo: voz del navegador
+    const bc = (await call(browser, 'GET', '/api/voice/config', { cookie })).json();
+    assert.equal(bc.provider, 'navegador'); assert.deepEqual(bc.missingEnv, []);
+    const bt = await call(browser, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } });
+    assert.equal(bt.status, 409); assert.match(bt.json().error, /navegador/);
     const stt = await call(deps, 'POST', '/api/voice/stt', { cookie, body: { audio: Buffer.from('audio').toString('base64'), mimeType: 'audio/webm;codecs=opus' } });
     assert.equal(stt.json().text, 'muéstrame mis clientes');
     assert.equal((await call(deps, 'POST', '/api/voice/stt', { cookie, body: { audio: 'eA==', mimeType: 'text/html' } })).status, 415);

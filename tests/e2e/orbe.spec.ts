@@ -97,6 +97,39 @@ test('orbe: teclado → piensa, se enciende la sección que trabaja y llegan sub
   await expect(page.getByTestId('orbscreen')).toBeVisible();
 });
 
+test('orbe: con la voz del navegador se lee con una voz en español elegida sola, sin pedir audio al servidor', async ({ page }) => {
+  // Se simula la síntesis del navegador (el Chromium sin pantalla no trae voces) y se pide la configuración «navegador».
+  await page.addInitScript(() => {
+    const w = window as unknown as { __spoken: { text: string; voice: string; lang: string }[]; __tts: number };
+    w.__spoken = []; w.__tts = 0;
+    Object.defineProperty(navigator, 'language', { value: 'es-MX', configurable: true });   // la voz se elige según el idioma del navegador
+    const voices = [{ name: 'Alex', lang: 'en-US', localService: true, default: true }, { name: 'Monica', lang: 'es-ES', localService: true }, { name: 'Paulina', lang: 'es-MX', localService: true }];
+    class U { text: string; lang = ''; voice: { name: string } | null = null; rate = 1; onstart: (() => void) | null = null; onend: (() => void) | null = null; onerror: (() => void) | null = null; onboundary: (() => void) | null = null; constructor(t: string) { this.text = t; } }
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', { value: U, configurable: true });
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      getVoices: () => voices, addEventListener() { /* sin eventos */ }, removeEventListener() { /* sin eventos */ }, cancel() { /* nada que cortar */ },
+      speak(u: U) { w.__spoken.push({ text: u.text, voice: u.voice?.name ?? '', lang: u.lang }); setTimeout(() => { u.onstart?.(); u.onboundary?.(); }, 20); setTimeout(() => u.onend?.(), 700); }
+    } });
+    const origFetch = window.fetch;
+    window.fetch = (...a: Parameters<typeof fetch>) => { if (String(a[0]).endsWith('/api/voice/tts')) w.__tts++; return origFetch(...a); };
+  });
+  await page.route('**/api/voice/config', async route => {
+    const r = await route.fetch();
+    const j = await r.json() as Record<string, unknown>;
+    await route.fulfill({ response: r, json: { ...j, provider: 'navegador', missingEnv: [] } });
+  });
+  await loginOrb(page);
+  await page.getByRole('button', { name: 'Teclado' }).click();
+  await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 15_000 });
+  const spoken = await page.evaluate(() => (window as unknown as { __spoken: { text: string; voice: string; lang: string }[] }).__spoken);
+  expect(spoken.length).toBeGreaterThan(0);
+  expect(spoken[0]!.voice).toBe('Paulina');                       // eligió una voz en español de América sin que nadie la configure
+  expect(spoken.map(x => x.text).join(' ')).toContain('Laura Méndez');
+  expect(await page.evaluate(() => (window as unknown as { __tts: number }).__tts)).toBe(0);   // no se pidió audio al servidor
+});
+
 test('orbe: lo que se pide por teclado también se lee en voz alta (voz activada por defecto), sin nombrar las partes internas', async ({ page }) => {
   await loginOrb(page);
   await expect(page.getByRole('button', { name: 'Voz', exact: true })).toHaveAttribute('aria-pressed', 'true');

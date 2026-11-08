@@ -54,6 +54,9 @@ export async function connectorContext(deps: Deps, userId: string, id: string, s
 
 export interface BoundTool { fullName: string; connectorId: string; tool: Tool; ctx: ToolContext }
 
+/** Tope de caracteres de las guías de conectores que se envían al modelo en cada petición (menos tokens por llamada). */
+export const GUIDE_BUDGET_CHARS = 4200;
+
 /**
  * Arma el conjunto de herramientas de un especialista con lo que el usuario tiene conectado.
  * Los conectores sin configurar se omiten (y se informan aparte), nunca rompen la petición.
@@ -63,13 +66,14 @@ export async function toolsForRole(deps: Deps, userId: string, role: Role, signa
   const tools: BoundTool[] = [];
   const unavailable: { id: string; title: string; state: string; error?: string }[] = [];
   const guides: string[] = [];
+  let used = 0;
   for (const c of CONNECTORS.filter(x => x.role === role || (x.role === 'nucleo' && x.id === 'memoria'))) {
     const s = statusOf(c, deps.cfg.env, st);
     if (s.state !== 'listo') { unavailable.push({ id: c.id, title: c.title, state: s.state }); continue; }
     const ctx: ToolContext = { deps, userId, settings: s.settings, signal };
     try {
       const list = await c.tools(ctx);
-      if (list.length) guides.push(`- ${c.title}: ${c.guide}`);
+      if (list.length) { const g = `- ${c.title}: ${c.guide}`; used += g.length; if (used <= GUIDE_BUDGET_CHARS) guides.push(g); }
       for (const t of list) tools.push({ fullName: llmName(`${c.id}__${t.name}`), connectorId: c.id, tool: t, ctx });
     } catch (e) {
       unavailable.push({ id: c.id, title: c.title, state: 'error', error: e instanceof Error ? e.message : String(e) });

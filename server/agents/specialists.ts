@@ -48,7 +48,7 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
   if (spec.availableFrom) {
     return { text: `El especialista ${spec.title} estará disponible en la ${spec.availableFrom}.`, cards, calls: 0, partial: false, unavailable: [] };
   }
-  if (!deps.llm) return { text: 'Falta configurar un motor de IA (GEMINI_API_KEY y GEMINI_MODEL, o GROQ_API_KEY y GROQ_MODEL).', cards, calls: 0, partial: false, unavailable: [] };
+  if (!deps.llm) return { text: 'Falta configurar un motor de IA (la clave de al menos un motor: GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY o CEREBRAS_API_KEY).', cards, calls: 0, partial: false, unavailable: [] };
 
   const deadlineMs = Math.max(1000, p.deadlineMs ?? deps.cfg.limits.specialistDeadlineMs);
   const maxCalls = p.maxCalls ?? deps.cfg.limits.specialistMaxCalls;
