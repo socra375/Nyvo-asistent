@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { decrypt, encrypt, hashPassword, parseKey, safeEqual, verifyPassword } from '../../server/crypto.js';
 import { matchWakeWord, WakeWordGate } from '../../web/src/voice/wakeword.js';
 import { toLlmSchema, llmName } from '../../server/llm/types.js';
-import { pcmToWav, prepareSpeech, rateFromMime } from '../../server/voice/tts.js';
+import { pcmToWav, prepareSpeech, providerFrom, rateFromMime } from '../../server/voice/tts.js';
+import { pickSpanishVoice } from '../../web/src/voice/voicePick.js';
 import { checkIdToken } from '../../server/auth/google.js';
 import { notionId, textToBlocks } from '../../connectors/notion/index.js';
 import { driveEscape, kindOf } from '../../connectors/google-drive/index.js';
@@ -158,8 +159,8 @@ test('escucha: Groq si hay clave, Gemini si no; STT_PROVIDER manda; faltantes ex
   assert.equal(sttProviderFrom({ STT_PROVIDER: 'groq' }), 'groq');
   assert.deepEqual(sttMissing({}), ['GROQ_API_KEY']);
   assert.deepEqual(sttMissing({ GROQ_API_KEY: 'k' }), []);
-  assert.deepEqual(sttMissing({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'm' }), []);
-  assert.deepEqual(sttMissing({ STT_PROVIDER: 'gemini' }), ['GEMINI_API_KEY', 'GEMINI_MODEL']);
+  assert.deepEqual(sttMissing({ GEMINI_API_KEY: 'k' }), [], 'Gemini solo necesita la clave (modelo por defecto)');
+  assert.deepEqual(sttMissing({ STT_PROVIDER: 'gemini' }), ['GEMINI_API_KEY']);
   assert.deepEqual(sttMissing({ STT_PROVIDER: 'groq' }), ['GROQ_API_KEY']);
 });
 
@@ -167,4 +168,24 @@ test('Whisper: se descartan las frases que inventa con silencio, y se conserva l
   for (const t of ['Subtítulos realizados por la comunidad de Amara.org', '¡Suscríbete!', 'Gracias por ver el vídeo', 'Subtítulos por Amara.org']) assert.equal(cleanTranscript(t), '', t);
   for (const t of ['Gracias.', 'muéstrame mis clientes', 'Anota que el proveedor sube precios en enero', 'suscripción de Notion vence mañana']) assert.equal(cleanTranscript(t), t);
   assert.equal(cleanTranscript('  hola \n  Nyvo  '), 'hola Nyvo');
+});
+
+test('voz del navegador: elige sola la mejor voz en español', () => {
+  const v = (name: string, lang: string, localService = true) => ({ name, lang, localService });
+  const voices = [v('Alex', 'en-US'), v('Monica', 'es-ES'), v('Google español de Estados Unidos', 'es-US', false), v('Paulina', 'es-MX'), v('Jorge', 'es-ES')];
+  assert.equal(pickSpanishVoice(voices, 'es-MX')?.name, 'Paulina', 'el idioma exacto del navegador gana');
+  assert.equal(pickSpanishVoice(voices, 'es-AR')?.name, 'Google español de Estados Unidos', 'sin exacta: América y voz «natural» antes que España');
+  assert.equal(pickSpanishVoice([v('Alex', 'en-US')], 'es-MX'), null, 'sin voces en español no inventa');
+  assert.equal(pickSpanishVoice([], 'es'), null);
+  assert.equal(pickSpanishVoice([v('X', 'es_MX')], 'es-mx')?.name, 'X', 'acepta es_MX y mayúsculas');
+});
+
+test('proveedor de voz: manda VOICE_PROVIDER; sin él, Gemini si está completo y si no, el navegador', () => {
+  assert.equal(providerFrom({}), 'navegador');
+  assert.equal(providerFrom({ VOICE_PROVIDER: ' Navegador ' }), 'navegador');
+  assert.equal(providerFrom({ VOICE_PROVIDER: 'browser' }), 'navegador');
+  assert.equal(providerFrom({ VOICE_PROVIDER: 'speechify' }), 'speechify');
+  assert.equal(providerFrom({ GEMINI_API_KEY: 'k', GEMINI_TTS_MODEL: 'm', GEMINI_TTS_VOICE: 'v' }), 'gemini');
+  assert.equal(providerFrom({ GEMINI_API_KEY: 'k' }), 'navegador', 'Gemini incompleto no cuenta');
+  assert.equal(providerFrom({ VOICE_PROVIDER: 'gemini' }), 'gemini');
 });

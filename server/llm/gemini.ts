@@ -34,7 +34,16 @@ export function createGemini(o: GeminiOpts): Llm {
         generationConfig: { temperature: 0.4, ...(o.thinkingBudget !== undefined ? { thinkingConfig: { thinkingBudget: o.thinkingBudget } } : {}) }
       };
       if (req.tools?.length) body.tools = [{ functionDeclarations: req.tools }];
-      const parts = partsOf(await geminiGenerate(o, o.model, body, req.signal));
+      let resp: Record<string, unknown>;
+      try { resp = await geminiGenerate(o, o.model, body, req.signal); }
+      catch (e) {
+        // Algunos modelos no admiten apagar el «pensar»: se reintenta una vez sin ese ajuste.
+        if (o.thinkingBudget !== undefined && e instanceof LlmHttpError && e.status === 400 && /think/i.test(e.message)) {
+          body.generationConfig = { temperature: 0.4 };
+          resp = await geminiGenerate(o, o.model, body, req.signal);
+        } else throw e;
+      }
+      const parts = partsOf(resp);
       const text = parts.map(p => ('text' in p ? p.text : '')).join('').trim();
       const calls = parts.flatMap(p => ('functionCall' in p ? [{ name: p.functionCall.name, args: p.functionCall.args ?? {} }] : []));
       return { text, calls, parts };

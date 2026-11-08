@@ -3,18 +3,26 @@ import { missingEnv } from '../config.js';
 import { geminiGenerate } from '../llm/gemini.js';
 import { HttpError } from '../http/http.js';
 
-export type VoiceProvider = 'gemini' | 'elevenlabs' | 'speechify';
+/** «navegador» = la voz del propio navegador (Web Speech): no necesita claves ni servidor. */
+export type VoiceProvider = 'gemini' | 'elevenlabs' | 'speechify' | 'navegador';
 export const VOICE_ENV: Record<VoiceProvider, readonly string[]> = {
   gemini: ['GEMINI_API_KEY', 'GEMINI_TTS_MODEL', 'GEMINI_TTS_VOICE'],
   elevenlabs: ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'],
-  speechify: ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID']
+  speechify: ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID'],
+  navegador: []
 };
 
-export const voiceProvider = (cfg: Config): VoiceProvider => providerFrom(cfg.env.VOICE_PROVIDER);
-/** Proveedor de voz según VOICE_PROVIDER; cualquier otro valor (o ninguno) es Gemini. */
-export function providerFrom(v: string | undefined): VoiceProvider {
-  const p = v?.trim().toLowerCase();
-  return p === 'elevenlabs' || p === 'speechify' ? p : 'gemini';
+export const voiceProvider = (cfg: Config): VoiceProvider => providerFrom(cfg.env);
+/**
+ * Proveedor de voz. VOICE_PROVIDER manda (gemini, elevenlabs, speechify o navegador/browser). Sin VOICE_PROVIDER: Gemini TTS si
+ * ya está configurado del todo y, si no, la voz del navegador, que no necesita nada.
+ */
+export function providerFrom(env: Record<string, string | undefined>): VoiceProvider {
+  const p = env.VOICE_PROVIDER?.trim().toLowerCase();
+  if (p === 'elevenlabs' || p === 'speechify') return p;
+  if (p === 'navegador' || p === 'browser') return 'navegador';
+  if (p) return 'gemini';
+  return VOICE_ENV.gemini.every(k => env[k]) ? 'gemini' : 'navegador';
 }
 export const voiceMissing = (cfg: Config) => missingEnv(cfg.env, VOICE_ENV[voiceProvider(cfg)]);
 
@@ -49,6 +57,7 @@ export function prepareSpeech(text: string, maxChars: number): string {
 export interface Speech { audio: Buffer; mimeType: string }
 
 export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: string, style?: string): Promise<Speech> {
+  if (voiceProvider(cfg) === 'navegador') throw new HttpError(409, 'La voz es la del navegador: se genera en tu equipo, no en el servidor.');
   const missing = voiceMissing(cfg);
   if (missing.length) throw new HttpError(503, `Falta configurar la voz: ${missing.join(', ')}.`);
   const text = prepareSpeech(rawText, cfg.limits.ttsMaxChars);

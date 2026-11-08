@@ -302,7 +302,7 @@ test('sin conectores configurados: cada panel dice qué variable falta, sin erro
   await expect(page.getByTestId('panel-drive').getByText('GOOGLE_CLIENT_ID')).toBeVisible();
   await expect(page.getByTestId('panel-notion').getByText('NOTION_TOKEN')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Entrar con Google' })).toHaveCount(0);
-  await expect(page.getByText(/Voz: falta configurar GEMINI_API_KEY/)).toBeVisible();
+  await expect(page.getByText(/Voz: falta configurar/)).toHaveCount(0);   // sin configurar nada, la voz es la del navegador (no falta nada)
   await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toBeDisabled();
   await sendChat(page, 'hola');
   await expect(lastAssistant(page)).toContainText('Falta configurar un motor de IA');

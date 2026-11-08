@@ -256,7 +256,7 @@ priv('GET', '/api/llm/status', async ({ res, deps }) => {
     rotation: order.filter(d => engineConfigured(env, d)).length > 1,
     order: order.map(d => d.name),
     engines: deps.llm?.status?.() ?? [],
-    notConfigured: ENGINES.filter(d => !engineConfigured(env, d)).map(d => ({ name: d.name, missingEnv: [d.keyVar, d.modelVar].filter(k => !env[k]) }))
+    notConfigured: ENGINES.filter(d => !engineConfigured(env, d)).map(d => ({ name: d.name, missingEnv: [d.keyVar] }))
   });
 });
 

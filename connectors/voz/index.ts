@@ -6,11 +6,11 @@ import { sttMissing } from '../../server/voice/stt.js';
 export const voz: Connector = {
   id: 'voz',
   title: 'Voz',
-  description: 'Texto a voz con Gemini TTS, o con Speechify / ElevenLabs según VOICE_PROVIDER; la voz a texto (escucha) con Whisper de Groq (GROQ_API_KEY) o, si no hay clave, con Gemini.',
+  description: 'Texto a voz con la voz del navegador (por defecto, sin claves) o con Gemini TTS / Speechify / ElevenLabs según VOICE_PROVIDER; la voz a texto (escucha) con Whisper de Groq (GROQ_API_KEY) o, si no hay clave, con Gemini.',
   role: 'nucleo',
-  guide: 'La síntesis se hace en el servidor, con límite de caracteres por petición.',
+  guide: 'La voz sale por el navegador o por un servicio externo, con límite de caracteres por trozo.',
   requiredEnv: VOICE_ENV.gemini,
   // Salida (síntesis) + entrada (transcripción): falta configurar si no hay forma de oír o de hablar.
-  envFor: env => [...VOICE_ENV[providerFrom(env.VOICE_PROVIDER)], ...sttMissing(env)],
+  envFor: env => [...VOICE_ENV[providerFrom(env)], ...sttMissing(env)],
   tools: () => []
 };

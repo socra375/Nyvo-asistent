@@ -12,6 +12,8 @@ import { withTiming, type Timing } from '../llm/timing.js';
 import { cleanReply } from './persona.js';
 
 const MAX_MAIN_STEPS = 4;
+/** Delegaciones a especialistas por petición (ahorra cuota y evita bucles). */
+const MAX_DELEGATIONS = 6;
 const HISTORY = 12;
 
 const DELEGATE: FunctionDecl = {
@@ -57,7 +59,7 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   await addMessage(deps.db, p.userId, conv.id, 'user', message);
 
   if (!deps.llm) {
-    const reply = 'Falta configurar un motor de IA (GEMINI_API_KEY y GEMINI_MODEL, o GROQ_API_KEY y GROQ_MODEL) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
+    const reply = 'Falta configurar un motor de IA (la clave de al menos un motor: GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY o CEREBRAS_API_KEY) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
     await addMessage(deps.db, p.userId, conv.id, 'assistant', reply);
     return { conversationId: conv.id, reply, cardIds: [], jobIds: [], partial: false };
   }
@@ -79,6 +81,7 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   const jobIds: string[] = [];
   let reply = '';
   let partial = false;
+  let delegations = 0;
 
   try {
     for (let step = 0; step < MAX_MAIN_STEPS; step++) {
@@ -100,7 +103,9 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
         const sp = String(call.args.especialista ?? '') as SpecialistId;
         const task = String(call.args.tarea ?? '').slice(0, 4000);
         let response: Record<string, unknown>;
-        if (call.name !== 'delegar' || !(sp in SPECIALISTS) || !task) {
+        if (++delegations > MAX_DELEGATIONS) {
+          response = { error: `Tope de ${MAX_DELEGATIONS} delegaciones por petición alcanzado: responde con lo que ya tienes.` };
+        } else if (call.name !== 'delegar' || !(sp in SPECIALISTS) || !task) {
           response = { error: 'Llamada inválida: usa delegar(especialista, tarea).' };
         } else if (call.args.en_segundo_plano === true) {
           const job = await enqueue(deps.db, { userId: p.userId, conversationId: conv.id, kind: 'especialista', title: task.slice(0, 80), payload: { especialista: sp, tarea: task } });
@@ -131,7 +136,7 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   if (noEngine) {
     const engines = deps.llm.status?.() ?? [];
     const why = st.lastError ?? engines.find(e => e.lastError)?.lastError ?? 'sin respuesta';
-    reply = `El motor de IA no respondió a tiempo (${why}). Suele ser sobrecarga o un modelo mal configurado: revisa GEMINI_MODEL o activa un segundo motor (GROQ_MODEL). Inténtalo de nuevo en un momento.`;
+    reply = `El motor de IA no respondió a tiempo (${why}). Suele ser sobrecarga o un modelo mal configurado: revisa los modelos (GEMINI_MODEL, GROQ_MODEL…) o añade la clave de otro motor (CEREBRAS_API_KEY, OPENROUTER_API_KEY). Inténtalo de nuevo en un momento.`;
   }
   reply = cleanReply(reply);
   if (!reply) reply = partial ? 'No alcancé a terminar todo dentro del tiempo de esta petición. Lo que quedó pendiente puedes pedírmelo de nuevo o en segundo plano.' : 'Listo.';
