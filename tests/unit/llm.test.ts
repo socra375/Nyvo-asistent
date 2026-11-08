@@ -7,6 +7,7 @@ import { anyEngineConfigured, buildLlm, engineOrder } from '../../server/llm/bui
 import { LlmHttpError, type Llm, type LlmRequest, type Turn } from '../../server/llm/types.js';
 import { loadConfig } from '../../server/config.js';
 import { runTurn } from '../../server/agents/main.js';
+import { normalizeSslMode } from '../../server/db/pool.js';
 import { call, freshDb, loginCookie, makeDeps, makeUser, needsDb } from '../helpers.js';
 import { initialState, startUpstream, upstreamEnv, type Upstream } from '../fakes/upstream.js';
 
@@ -255,6 +256,40 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     assert.equal(last.tipo, 'error'); assert.equal(last.status, 503);
   });
 
+  test('un motor colgado ya no deja la petición hasta que Vercel la mata: el turno responde dentro de su plazo', async () => {
+    const hang: Llm = { generate: req => new Promise((_res, rej) => req.signal?.addEventListener('abort', () => rej(new Error('abortado')))), transcribe: async () => '' };
+    const deps = makeDeps(db, { ...env, TURN_BUDGET_MS: '1000' }, { llm: hang });
+    const t0 = performance.now();
+    const r = await runTurn(deps, { userId, conversationId: null, message: 'hola' });
+    const took = performance.now() - t0;
+    assert.ok(took < 2500, `respondió en ${Math.round(took)} ms`);
+    assert.equal(r.partial, true);
+    assert.match(r.reply, /No alcancé a terminar/);
+    assert.equal(r.timing!.llmCalls, 1);
+  });
+
+  test('cada turno informa dónde se fue el tiempo (llamadas, motor, más lenta)', async () => {
+    const deps = makeDeps(db, env);
+    const r = await runTurn(deps, { userId, conversationId: null, message: '¿Qué clientes tengo?' });
+    assert.ok(r.timing!.llmCalls >= 3, 'delegar + herramienta + respuesta final');
+    assert.deepEqual(r.timing!.engines, ['gemini']);
+    assert.ok(r.timing!.totalMs! >= r.timing!.slowestMs);
+    const { cookie } = await loginCookie(deps);
+    const live = await call(deps, 'POST', '/api/chat/stream', { cookie, body: { message: '¿Qué clientes tengo?' }, headers: { origin: 'http://nyvo.test' } });
+    const fin = JSON.parse(live.body.trim().split('\n').pop()!);
+    assert.equal(fin.tipo, 'fin'); assert.ok(fin.timing.llmCalls >= 3);
+  });
+
+  test('GEMINI_THINKING_BUDGET solo se envía si se configura', async () => {
+    await runTurn(makeDeps(db, env), { userId, conversationId: null, message: 'hola' });
+    const gc = (i: number) => (up.state.geminiRequests[i]!.body.generationConfig as Record<string, unknown>);
+    assert.equal(gc(0).thinkingConfig, undefined);
+    await runTurn(makeDeps(db, { ...env, GEMINI_THINKING_BUDGET: '0' }), { userId, conversationId: null, message: 'hola' });
+    assert.deepEqual(gc(up.state.geminiRequests.length - 1).thinkingConfig, { thinkingBudget: 0 });
+    await runTurn(makeDeps(db, { ...env, GEMINI_THINKING_BUDGET: 'mucho' }), { userId, conversationId: null, message: 'hola' });
+    assert.equal(gc(up.state.geminiRequests.length - 1).thinkingConfig, undefined, 'un valor no numérico se ignora');
+  });
+
   test('sin ningún motor: «falta configurar» y la ruta de estado dice qué falta', async () => {
     const none = makeDeps(db, { ...env, GEMINI_API_KEY: '', GEMINI_MODEL: '', GROQ_API_KEY: '', GROQ_MODEL: '' });
     const { cookie } = await loginCookie(none);
@@ -263,4 +298,13 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     assert.equal(j.rotation, false); assert.deepEqual(j.engines, []);
     assert.equal(j.notConfigured.length, 3);
   });
+});
+
+test('SSL de la base: se escribe verify-full explícito (mismo comportamiento que ya aplica pg) y se respeta lo demás', () => {
+  assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=require'), 'postgres://u:p@h/db?sslmode=verify-full');
+  assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=prefer&channel_binding=require'), 'postgres://u:p@h/db?sslmode=verify-full&channel_binding=require');
+  assert.equal(normalizeSslMode('postgres://u:p@h/db?x=1&sslmode=verify-ca'), 'postgres://u:p@h/db?x=1&sslmode=verify-full');
+  assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=verify-full'), 'postgres://u:p@h/db?sslmode=verify-full');
+  assert.equal(normalizeSslMode('postgres://u:p@h/db?sslmode=disable'), 'postgres://u:p@h/db?sslmode=disable');
+  assert.equal(normalizeSslMode('postgres://u:p@localhost/db'), 'postgres://u:p@localhost/db');
 });

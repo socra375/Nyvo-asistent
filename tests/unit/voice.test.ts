@@ -156,11 +156,26 @@ test('cola de voz: una lectura nueva cancela la anterior; un error de síntesis 
   await p1;
   assert.deepEqual(first, ['cancelado']);
   assert.deepEqual(second, ['fin']);
+  // Un trozo que el proveedor rechaza se salta: el resto de la respuesta sigue sonando
   const bad = fakeQueue({ failOn: 'b' });
-  let reason = '', err: unknown;
-  await bad.q.speak(['a', 'b'], { onEnd: (r, e) => { reason = r; err = e; } });
-  assert.equal(reason, 'error');
+  let reason = '';
+  await bad.q.speak(['a', 'b', 'c'], { onEnd: r => { reason = r; } });
+  assert.equal(reason, 'fin');
+  assert.deepEqual(bad.log.filter(l => l.startsWith('play')), ['play:a', 'play:c']);
+  // Si no suena nada, sí es un error (con el motivo)
+  const all = fakeQueue({ failOn: 'a' });
+  let r2 = '', err: unknown;
+  await all.q.speak(['a'], { onEnd: (r, e) => { r2 = r; err = e; } });
+  assert.equal(r2, 'error');
   assert.match(String((err as Error).message), /fallo/);
+});
+
+test('troceado: se descartan los trozos sin letras ni números', () => {
+  const mixed = chunkForSpeech('Hola. … ¿? Adiós.');
+  assert.ok(mixed.length >= 1 && mixed.every(c => /[\p{L}\p{N}]/u.test(c)));
+  assert.match(mixed.join(' '), /Hola/); assert.match(mixed.join(' '), /Adiós/);
+  for (const c of chunkForSpeech('… ¿? ¡! — Cobraste 450 dólares. ...')) assert.match(c, /[\p{L}\p{N}]/u);
+  assert.deepEqual(chunkForSpeech('… ¿? !'), []);
 });
 
 test('conversación: flujo normal y estados', () => {

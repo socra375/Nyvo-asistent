@@ -26,6 +26,7 @@ export interface Config {
   limits: {
     ttsMaxChars: number;
     sttMaxBytes: number;
+    turnBudgetMs: number;
     specialistDeadlineMs: number;
     specialistMaxCalls: number;
     jobsTickBudgetMs: number;
@@ -60,6 +61,8 @@ export function loadConfig(env: Env = process.env): Config {
     limits: {
       ttsMaxChars: int(env.TTS_MAX_CHARS, 1500),
       sttMaxBytes: int(env.STT_MAX_BYTES, 3_000_000),
+      /** Plazo total de una respuesta de chat; deja margen bajo el corte de 60 s de Vercel. */
+      turnBudgetMs: int(env.TURN_BUDGET_MS, 50_000),
       specialistDeadlineMs: int(env.SPECIALIST_DEADLINE_MS, 40_000),
       specialistMaxCalls: int(env.SPECIALIST_MAX_CALLS, 8),
       jobsTickBudgetMs: int(env.JOBS_TICK_BUDGET_MS, 45_000)

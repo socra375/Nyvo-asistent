@@ -33,13 +33,13 @@ export function buildLlm(cfg: Config, fetchImpl: typeof fetch): Llm | null {
   for (const d of engineOrder(env)) {
     if (!engineConfigured(env, d)) continue;
     const apiKey = env[d.keyVar]!, model = env[d.modelVar]!;
-    if (d.name === 'gemini') engines.push({ name: d.name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl }) });
+    if (d.name === 'gemini') engines.push({ name: d.name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl, thinkingBudget: env.GEMINI_THINKING_BUDGET !== undefined && env.GEMINI_THINKING_BUDGET !== '' && Number.isFinite(Number(env.GEMINI_THINKING_BUDGET)) ? Number(env.GEMINI_THINKING_BUDGET) : undefined }) });
     else if (d.name === 'groq') engines.push({ name: d.name, model, llm: createOpenAiCompat({ name: 'Groq', apiKey, model, baseUrl: `${cfg.urls.groq}/v1`, fetch: fetchImpl }) });
     else engines.push({ name: d.name, model, llm: createOpenAiCompat({ name: 'OpenRouter', apiKey, model, baseUrl: `${cfg.urls.openrouter}/v1`, fetch: fetchImpl }) });
   }
   if (!engines.length) return null;
   return createFailover(engines, {
-    attemptTimeoutMs: num(env.LLM_ATTEMPT_TIMEOUT_MS, 15_000),
+    attemptTimeoutMs: num(env.LLM_ATTEMPT_TIMEOUT_MS, 10_000),
     cooldownMs: num(env.LLM_COOLDOWN_MS, 60_000),
     onSwitch: e => console.warn(`motor de IA: ${e.from} falló (${e.error})${e.to ? `; paso a ${e.to}` : '; no quedan más'}`)
   });

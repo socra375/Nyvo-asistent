@@ -386,6 +386,8 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         if (req.headers.authorization !== 'Bearer speechify-falso') return send(res, 401, {});
         const b = JSON.parse(await body(req)) as { input?: string; voice_id?: string; audio_format?: string; model?: string };
         if (!b.input || !b.voice_id || b.audio_format !== 'mp3' || !b.model) return send(res, 400, { error: 'cuerpo incompleto' });
+        if (/[<&\p{Cc}]/u.test(b.input)) return send(res, 400, { message: 'input contiene marcas no permitidas' });
+        if (b.input.includes('RECHAZAR')) return send(res, 400, { message: 'texto rechazado por el proveedor' });
         return send(res, 200, { audio_data: Buffer.from([0xff, 0xfb, 0x90, 0x00]).toString('base64'), audio_format: 'mp3', billable_characters_count: b.input.length });
       }
       send(res, 404, { error: 'ruta falsa desconocida' });

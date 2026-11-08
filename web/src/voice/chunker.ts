@@ -26,5 +26,6 @@ export function chunkForSpeech(text: string, opts: { firstMax?: number; max?: nu
     else cur = cur ? `${cur} ${s}` : s;
   }
   if (cur) out.push(cur);
-  return out;
+  // Un trozo de solo signos («…», «¿?») no se puede leer y algunos proveedores lo rechazan: se descarta.
+  return out.filter(c => /[\p{L}\p{N}]/u.test(c));
 }
