@@ -64,6 +64,7 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
     const system = [
       `Eres el especialista «${spec.title}» de Nyvo, el segundo director de AINova System. Tu ámbito: ${spec.description}`,
       'Resuelve SOLO la tarea recibida, con el mínimo de llamadas. Al terminar, responde con un resumen breve de lo hecho y los datos clave.',
+      'Devuelve los datos tal cual, sin presentarlos ni decir qué herramienta, conector, sección o sistema usaste, y sin nombrar a Rose, Johan, Mia ni a ti mismo como especialista: quien te lee ya sabe de dónde vienen.',
       guides.length ? `Conectores disponibles:\n${guides.join('\n')}` : 'No hay conectores listos para este especialista: explica qué falta configurar.',
       unavailable.length ? `No disponibles ahora: ${unavailable.map(u => `${u.title} (${u.state.replace('_', ' ')})`).join(', ')}.` : '',
       SECURITY_RULES

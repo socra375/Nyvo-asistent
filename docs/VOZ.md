@@ -16,6 +16,14 @@ Cada hemisferio es un clúster con su color: **Johan** naranja (casquete denso e
 
 Estados: **reposo** (giro lento), **escuchando** (el orbe «inhala»: se recoge un poco con tu voz, entran anillos lentos hacia el núcleo y el tono es frío), **pensando** (giro más rápido, muchas señales por las aristas), **hablando** (el orbe «exhala»: se expande suavemente con la voz de Nyvo, salen anillos lentos del núcleo y el tono se vuelve cálido). En ambos casos el nivel de audio se suaviza mucho (sube en ~0,2 s y baja en ~0,5 s) y mueve al orbe entero como un cuerpo, nunca nodo por nodo, para que no «tiemble». Con `prefers-reduced-motion` el movimiento, las señales y las ondas se atenúan; en pantallas pequeñas hay menos nodos. Un dibujo no es una captura: parecerse «exactamente» a la referencia es una aproximación, no una copia píxel a píxel.
 
+## Una sola voz, sin nombrar las partes
+Nyvo habla como una persona: no dice «Johan me informa que…», ni «en la sección de clientes», ni de qué sistema salió el dato, salvo que se lo preguntes o haga falta para actuar (por ejemplo, dónde guardó una nota). Se aplica en tres sitios: una regla explícita con ejemplos «Mal/Bien» en las reglas de la plataforma, una instrucción a los especialistas para que devuelvan el dato sin presentarlo, y un filtro (`server/agents/persona.ts`) que quita etiquetas `[JOHAN]:`, rótulos de línea y los giros «X me informa que» / «Según X,». El filtro cubre lo evidente; la prosa libre depende del modelo, así que **no se puede garantizar al 100 %**.
+
+## Mientras trabaja, y cuando responde
+- El estado «pensando» muestra lo que hace, sin nombres internos: «Consultando tus clientes y cobros…», «Revisando tu agenda…».
+- Si la espera pasa de ~0,9 s con una herramienta en marcha y la voz está activada, dice una frase corta («Un momento, lo reviso.»); si la respuesta llega mientras suena, espera a que termine (máx. 2,5 s) antes de leerla.
+- **Voz:** interruptor en la esquina (se recuerda). Con la voz activada, la respuesta se lee **también cuando la pides por teclado**; antes solo salía el texto. Si falla la síntesis, el error aparece en pantalla en vez de quedarse en silencio.
+
 ## Conversación por voz (manos libres)
 ```
 inactivo ─tocar→ escuchando ─frase→ pensando ─respuesta→ hablando ─fin→ escuchando

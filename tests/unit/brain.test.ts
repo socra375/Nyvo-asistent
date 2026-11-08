@@ -7,6 +7,7 @@ import { HEMISPHERES, hemisphereFor, type TurnEvent } from '../../server/agents/
 import { mainSystemPrompt, runTurn } from '../../server/agents/main.js';
 import { runSpecialist } from '../../server/agents/specialists.js';
 import { looksLikePersonalData } from '../../connectors/notion/index.js';
+import { cleanReply } from '../../server/agents/persona.js';
 import { call, freshDb, loginCookie, makeDeps, makeUser, needsDb, scriptedLlm, settleDeferred } from '../helpers.js';
 import { initialState, startUpstream, upstreamEnv, type Upstream } from '../fakes/upstream.js';
 
@@ -50,6 +51,26 @@ test('el estilo del dueño se añade al final', () => {
   const p = composeMainPrompt({ specialists: '- x', style: { description: 'directo y cálido', samples: ['Hola Ana'] }, security: 'SEG' });
   assert.ok(p.indexOf('directo y cálido') > p.indexOf(PLATFORM_RULES));
   assert.ok(p.endsWith('SEG'));
+});
+
+test('una sola voz: el prompt prohíbe nombrar las partes internas y de dónde sale el dato, con ejemplos', () => {
+  assert.match(PLATFORM_RULES, /UNA SOLA VOZ, SIN COSTURAS/);
+  assert.match(PLATFORM_RULES, /NUNCA nombres a Rose, Johan ni Mia/);
+  assert.match(PLATFORM_RULES, /Mal: «Johan me informa que/);
+  assert.match(PLATFORM_RULES, /Bien: «Tienes 2 clientes activos/);
+  assert.match(mainSystemPrompt(style), /UNA SOLA VOZ/);
+});
+
+test('cleanReply: quita etiquetas y presentaciones del tipo «Johan me informa que», sin tocar el resto', () => {
+  assert.equal(cleanReply('[JOHAN]: Tienes 2 clientes activos.'), 'Tienes 2 clientes activos.');
+  assert.equal(cleanReply('[MIA -> JOHAN]: Perfil enviado.'), 'Perfil enviado.');
+  assert.equal(cleanReply('Johan me informa que tienes 2 clientes activos.'), 'Tienes 2 clientes activos.');
+  assert.equal(cleanReply('Rose me avisa de que Laura escribió.'), 'Laura escribió.');
+  assert.equal(cleanReply('Según Johan, el cobro sigue pendiente.'), 'El cobro sigue pendiente.');
+  assert.equal(cleanReply('Hola.\nJohan: tienes 2 clientes.'), 'Hola.\nTienes 2 clientes.');
+  assert.equal(cleanReply('Rose (mensajes): hay uno nuevo.'), 'Hay uno nuevo.');
+  // Lo demás se queda igual
+  for (const t of ['Tienes 2 clientes activos: Laura Méndez y Pedro Ruiz.', 'Soy Nyvo, tu asistente.', 'Mia Gómez confirmó la reunión.', 'Johan Pérez debe 450 dólares.', 'Lo guardé en Notion.']) assert.equal(cleanReply(t), t);
 });
 
 test('hemisferios: cuatro fijos y cada herramienta cae en el correcto', () => {

@@ -45,10 +45,10 @@ export function OrbScreen({ onActivity, notify, openPanel, logout, jobsActive }:
       </button>
 
       <div className="orb-status" aria-live="polite" data-testid="orb-status">
-        {v.sttReady || v.live ? HINT[v.state] : 'Voz sin configurar: escríbele a Nyvo con el teclado'}
+        {v.state === 'pensando' && v.working ? v.working : v.sttReady || v.live ? HINT[v.state] : 'Voz sin configurar: escríbele a Nyvo con el teclado'}
         {jobsActive ? ` · ${jobsActive} trabajo${jobsActive > 1 ? 's' : ''} en curso` : ''}
       </div>
-      {v.state === 'hablando' && <button type="button" className="orb-ctl stop" onClick={v.stopSpeaking}>Callar</button>}
+      {(v.state === 'hablando') && <button type="button" className="orb-ctl stop" onClick={v.stopSpeaking}>Callar</button>}
 
       {captions && (v.heard || v.reply) && (
         <div className="orb-captions" data-testid="captions">
@@ -67,6 +67,8 @@ export function OrbScreen({ onActivity, notify, openPanel, logout, jobsActive }:
       <div className="orb-corner bl">
         <button type="button" className="orb-ctl" aria-pressed={keyboard} onClick={() => setKeyboard(k => !k)}>Teclado</button>
         <button type="button" className="orb-ctl" aria-pressed={captions} onClick={() => setCaptions(c => !c)}>Subtítulos</button>
+        <button type="button" className="orb-ctl" aria-pressed={v.voiceOn && v.voiceReady} disabled={!v.voiceReady} onClick={v.toggleVoice}
+          title={v.voiceReady ? 'Leer las respuestas en voz alta (también las que pides por teclado)' : 'Falta configurar la voz de Nyvo'}>Voz</button>
       </div>
       {keyboard && (
         <form className="orb-type" onSubmit={e => { e.preventDefault(); v.sendText(text); setText(''); }}>

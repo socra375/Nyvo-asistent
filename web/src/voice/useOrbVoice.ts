@@ -13,6 +13,14 @@ const STT_RATE = 16_000;
 const MAX_UTTERANCE_MS = 30_000;
 const READY_FADE_MS = 2500;
 const MIN_ACTIVE_MS = 450;
+const VOICE_KEY = 'nyvo.voz';
+/** Qué se muestra mientras trabaja: lo que hace, sin nombrar las partes internas de Nyvo. */
+const WORKING: Record<Hemisphere, string> = { rose: 'Revisando tus mensajes…', johan: 'Consultando tus clientes y cobros…', mia: 'Revisando tu agenda…', nyvo: 'Buscando en tus archivos…' };
+/** Frase corta hablada si la espera se alarga: que no haya silencio muerto mientras busca el dato. */
+const FILLERS = ['Un momento, lo reviso.', 'Dame un segundo.', 'Ya lo miro.'];
+const FILLER_AFTER_MS = 900;
+const FILLER_WAIT_MS = 2500;
+const readVoicePref = (): boolean => { try { return window.localStorage.getItem(VOICE_KEY) !== 'off'; } catch { return true; } };
 
 export interface OrbVoice {
   /** Estado que muestra el orbe. */
@@ -30,6 +38,11 @@ export interface OrbVoice {
   live: boolean;
   /** Nivel de audio actual 0..1 (micrófono o voz de Nyvo), para animar sin re-renderizar. */
   getLevel: () => number;
+  /** Leer las respuestas en voz alta (también las que se piden por teclado). */
+  voiceOn: boolean;
+  toggleVoice: () => void;
+  /** Qué está haciendo mientras trabaja («Consultando tus clientes y cobros…»), o null. */
+  working: string | null;
   toggle: () => void;
   sendText: (text: string) => void;
   stopSpeaking: () => void;
@@ -48,6 +61,9 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const [cards, setCardsState] = useState<Card[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceConfig | null>(null);
+  const [voiceOn, setVoiceOn] = useState(readVoicePref);
+  const [textSpeaking, setTextSpeaking] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
 
   const convRef = useRef<ConvState>('inactivo');
   const voiceRef = useRef<VoiceConfig | null>(null);
@@ -61,11 +77,15 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const turn = useRef(0);                       // identifica la petición vigente: las anteriores se descartan
   const abort = useRef<AbortController | null>(null);
   const level = useRef(0);
+  const voiceOnRef = useRef(voiceOn);
+  const filler = useRef<{ timer?: ReturnType<typeof setTimeout>; done?: Promise<void> }>({});
+  const fillerIdx = useRef(0);
   const fade = useRef<Partial<Record<Hemisphere, ReturnType<typeof setTimeout>>>>({});
   const activity = useRef(onActivity);
   const notifyRef = useRef(notify);
   useEffect(() => { activity.current = onActivity; notifyRef.current = notify; }, [onActivity, notify]);
   useEffect(() => { voiceRef.current = voice; }, [voice]);
+  useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
   useEffect(() => { void api<VoiceConfig>('/api/voice/config').then(setVoice).catch(() => undefined); }, []);
 
   const since = useRef<Partial<Record<Hemisphere, number>>>({});
@@ -94,7 +114,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const run = useCallback((actions: ConvAction[]) => {
     for (const a of actions) {
       if (a === 'cortar-voz') speakerRef.current?.queue.cancel();
-      else if (a === 'cancelar-peticion') { turn.current++; abort.current?.abort(); abort.current = null; clearSections(); }
+      else if (a === 'cancelar-peticion') { turn.current++; abort.current?.abort(); abort.current = null; speakerRef.current?.queue.cancel(); setWorking(null); clearSections(); }
       else if (a === 'cerrar-microfono') closeMic();
       else if (a === 'empezar-frase') { turn.current++; abort.current?.abort(); abort.current = null; utter.current = preroll.current?.take() ?? []; }
     }
@@ -108,40 +128,76 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   }, [run]);
 
   // ───── envío al chat y lectura de la respuesta ─────
-  const converse = useCallback(async (message: string, spoken: boolean) => {
+  /** Frase corta hablada si el trabajo se alarga (una vez por turno). */
+  const startFiller = useCallback((mine: number) => {
+    if (filler.current.timer || filler.current.done) return;
+    filler.current.timer = setTimeout(() => {
+      filler.current.timer = undefined;
+      const sp = speakerRef.current;
+      if (!sp || mine !== turn.current) return;
+      filler.current.done = sp.queue.speak([FILLERS[fillerIdx.current++ % FILLERS.length]!], {});
+    }, FILLER_AFTER_MS);
+  }, []);
+  /** Cancela la frase pendiente; si ya está sonando, espera (poco) a que termine para no cortarla a medias. */
+  const endFiller = useCallback(async () => {
+    clearTimeout(filler.current.timer);
+    const done = filler.current.done;
+    filler.current = {};
+    if (done) await Promise.race([done, new Promise<void>(r => setTimeout(r, FILLER_WAIT_MS))]);
+  }, []);
+
+  /** `live`: conversación por micrófono activa. `spoken`: la respuesta será corta y se leerá en voz alta (si hay voz). */
+  const converse = useCallback(async (message: string, o: { live: boolean; spoken: boolean }) => {
     const mine = ++turn.current;
     const ctrl = new AbortController();
     abort.current = ctrl;
-    setHeard(message); setError(null);
+    filler.current = {};
+    setHeard(message); setError(null); setWorking(null);
     try {
-      const fin = await streamChat({ message, conversationId: convId.current, voice: spoken }, e => {
-        if (mine === turn.current && e.tipo === 'hemisferio') mark(e.id, e.estado);
+      const fin = await streamChat({ message, conversationId: convId.current, voice: o.spoken }, e => {
+        if (mine !== turn.current || e.tipo !== 'hemisferio') return;
+        mark(e.id, e.estado);
+        if (e.estado === 'activo') { setWorking(WORKING[e.id]); if (o.spoken && speakerRef.current) startFiller(mine); }
       }, ctrl.signal);
+      setWorking(null);
+      if (mine !== turn.current) { await endFiller(); return; }
+      await endFiller();
       if (mine !== turn.current) return;
       convId.current = fin.conversationId;
       setReply(fin.reply);
       setCardsState(c => [...c.filter(x => !fin.cards.some(y => y.id === x.id)), ...fin.cards]);
       activity.current();
       const v = voiceRef.current;
-      const canSpeak = spoken && !!v && !v.missingEnv.length && !!speakerRef.current;
+      const canSpeak = o.spoken && !!v && !v.missingEnv.length && !!speakerRef.current;
       // Las secciones que trabajaron quedan en «listo» y se apagan solas (READY_FADE_MS).
-      if (!spoken) { setTextBusy(false); return; }
-      dispatch({ tipo: 'respuesta-lista', hayVoz: canSpeak });
-      if (!canSpeak) return;
-      const speaker = speakerRef.current!;
-      await speaker.queue.speak(chunkForSpeech(fin.reply.slice(0, v!.maxChars)), {
-        onEnd: (why, err) => {
-          if (why === 'fin' && mine === turn.current) dispatch({ tipo: 'voz-termina' });
-          if (why === 'error') { setError(err instanceof Error ? err.message : 'No se pudo leer la respuesta.'); if (mine === turn.current) dispatch({ tipo: 'voz-termina' }); }
-        }
+      const chunks = canSpeak ? chunkForSpeech(fin.reply.slice(0, v!.maxChars)) : [];
+      if (o.live) {
+        dispatch({ tipo: 'respuesta-lista', hayVoz: canSpeak });
+        if (!canSpeak) return;
+        await speakerRef.current!.queue.speak(chunks, {
+          onEnd: (why, err) => {
+            if (why === 'fin' && mine === turn.current) dispatch({ tipo: 'voz-termina' });
+            if (why === 'error') { setError(err instanceof Error ? err.message : 'No se pudo leer la respuesta.'); if (mine === turn.current) dispatch({ tipo: 'voz-termina' }); }
+          }
+        });
+        return;
+      }
+      // Pedido por teclado: también se lee en voz alta si la voz está activada (antes solo salía el texto).
+      setTextBusy(false);
+      if (!canSpeak || !chunks.length) return;
+      setTextSpeaking(true);
+      await speakerRef.current!.queue.speak(chunks, {
+        onEnd: (why, err) => { if (why === 'error') setError(err instanceof Error ? err.message : 'No se pudo leer la respuesta.'); }
       });
+      if (mine === turn.current) setTextSpeaking(false);
     } catch (e) {
+      clearTimeout(filler.current.timer); filler.current = {};
       if (ctrl.signal.aborted || mine !== turn.current) return;
       const msg = e instanceof ApiError || e instanceof Error ? e.message : String(e);
-      setError(msg); notifyRef.current(msg, true); setTextBusy(false); clearSections();
+      setError(msg); notifyRef.current(msg, true); setTextBusy(false); setWorking(null); clearSections();
       dispatch({ tipo: 'error' });
     }
-  }, [mark, clearSections, dispatch]);
+  }, [mark, clearSections, dispatch, startFiller, endFiller]);
 
   const transcribe = useCallback(async (blocks: Float32Array[], rate: number) => {
     const mine = turn.current;
@@ -157,7 +213,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       if (!res.ok) throw new Error(j.error ?? 'No se pudo transcribir.');
       const text = (j.text ?? '').trim();
       if (!text) { dispatch({ tipo: 'sin-texto' }); return; }
-      await converse(text, true);
+      await converse(text, { live: true, spoken: voiceOnRef.current });
     } catch (e) {
       if (mine !== turn.current || (e instanceof DOMException && e.name === 'AbortError')) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -199,6 +255,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const start = useCallback(async () => {
     setError(null);
     try {
+      void ctxRef.current?.close().catch(() => undefined);   // el de leer por teclado, si lo había
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.resume();
       ctxRef.current = ctx;
@@ -219,28 +276,55 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
     else dispatch({ tipo: 'desactivar' });
   }, [start, dispatch]);
 
+  /** Audio para leer respuestas sin abrir el micrófono (se crea al primer envío: es un gesto del usuario). */
+  const ensureSpeaker = useCallback(async () => {
+    if (speakerRef.current) return;
+    try {
+      const ctx = new AudioContext({ latencyHint: 'interactive' });
+      await ctx.resume();
+      ctxRef.current = ctx;
+      speakerRef.current = createSpeaker(ctx);
+    } catch { /* sin audio: se muestra solo el texto */ }
+  }, []);
+
   const sendText = useCallback((text: string) => {
     const t = text.trim();
     if (!t) return;
-    // Si la conversación por voz está activa, la respuesta también se lee; si no, solo se muestra.
-    const spoken = convRef.current !== 'inactivo';
-    if (spoken) { speakerRef.current?.queue.cancel(); dispatch({ tipo: 'voz-inicia', interrumpe: false }); dispatch({ tipo: 'frase-lista' }); }
-    else setTextBusy(true);
-    void converse(t, spoken);
-  }, [converse, dispatch]);
+    const live = convRef.current !== 'inactivo';
+    const talk = voiceOnRef.current;
+    if (live) { speakerRef.current?.queue.cancel(); dispatch({ tipo: 'voz-inicia', interrumpe: false }); dispatch({ tipo: 'frase-lista' }); }
+    else { speakerRef.current?.queue.cancel(); setTextSpeaking(false); setTextBusy(true); }
+    void (async () => {
+      if (!live && talk && voiceRef.current && !voiceRef.current.missingEnv.length) await ensureSpeaker();
+      await converse(t, { live, spoken: live || talk });
+    })();
+  }, [converse, dispatch, ensureSpeaker]);
 
   const stopSpeaking = useCallback(() => {
-    if (convRef.current === 'hablando') { speakerRef.current?.queue.cancel(); dispatch({ tipo: 'voz-termina' }); }
+    const was = convRef.current === 'hablando';
+    speakerRef.current?.queue.cancel();
+    setTextSpeaking(false);
+    if (was) dispatch({ tipo: 'voz-termina' });
   }, [dispatch]);
+
+  const toggleVoice = useCallback(() => {
+    setVoiceOn(on => {
+      const next = !on;
+      try { window.localStorage.setItem(VOICE_KEY, next ? 'on' : 'off'); } catch { /* sin almacenamiento: vale solo esta sesión */ }
+      if (!next) { speakerRef.current?.queue.cancel(); setTextSpeaking(false); }
+      return next;
+    });
+  }, []);
 
   useEffect(() => () => { turn.current++; abort.current?.abort(); speakerRef.current?.queue.cancel(); closeMic(); HEMISPHERES.forEach(h => clearTimeout(fade.current[h])); }, [closeMic]);
 
-  const state: OrbState = conv !== 'inactivo' ? conv : textBusy ? 'pensando' : 'reposo';
+  const state: OrbState = conv !== 'inactivo' ? conv : textSpeaking ? 'hablando' : textBusy ? 'pensando' : 'reposo';
   const setCards = useCallback((fn: (c: Card[]) => Card[]) => setCardsState(fn), []);
-  const getLevel = useCallback(() => level.current, []);
+  // Mientras suena la voz de Nyvo (con o sin micrófono) el nivel sale del altavoz; si no, del micrófono.
+  const getLevel = useCallback(() => (speakerRef.current?.queue.speaking ? speakerRef.current.level() : level.current), []);
 
   return useMemo(() => ({
-    state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking,
+    state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working,
     voiceReady: !!voice && !voice.missingEnv.length, sttReady: !!voice?.stt, live: conv !== 'inactivo', onActivity
-  }), [state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voice, conv, onActivity]);
+  }), [state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working, voice, conv, onActivity]);
 }
