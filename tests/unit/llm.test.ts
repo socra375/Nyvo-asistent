@@ -87,10 +87,16 @@ describe('rotación de motores (failover)', () => {
     assert.equal(f.status!()[0]!.state, 'enfriamiento');
   });
 
-  test('con un solo motor no se impone límite de tiempo (se conserva el comportamiento de siempre)', async () => {
-    const only = engine('solo', async (_n, req) => { assert.equal(req.signal, undefined); await new Promise(r => setTimeout(r, 60)); return 'tarde pero bien'; });
-    const f = createFailover([only], { attemptTimeoutMs: 10, cooldownMs: 1000 });
-    assert.equal((await f.generate(REQ)).text, 'tarde pero bien');
+  test('con un solo motor también hay límite (no hay a quién pasar, pero no se queda colgado): por defecto el doble, mínimo 20 s', async () => {
+    const quick = engine('solo', async (_n, req) => { assert.ok(req.signal, 'lleva un plazo'); await new Promise(r => setTimeout(r, 60)); return 'tarde pero bien'; });
+    assert.equal((await createFailover([quick], { attemptTimeoutMs: 10, cooldownMs: 1000 }).generate(REQ)).text, 'tarde pero bien', 'un motor lento pero vivo no se corta antes de tiempo');
+    const hung = engine('solo', (_n, req) => new Promise((_res, rej) => req.signal!.addEventListener('abort', () => rej(new Error('abortado')))));
+    const t0 = performance.now();
+    await assert.rejects(createFailover([hung], { attemptTimeoutMs: 10, singleEngineLimitMs: 80, cooldownMs: 1000 }).generate(REQ), /solo: sin respuesta en 80 ms/);
+    assert.ok(performance.now() - t0 < 600);
+    // 0 = sin límite (se conserva la opción)
+    const free = engine('solo', async (_n, req) => { assert.equal(req.signal, undefined); return 'ok'; });
+    assert.equal((await createFailover([free], { attemptTimeoutMs: 10, singleEngineLimitMs: 0, cooldownMs: 1000 }).generate(REQ)).text, 'ok');
   });
 
   test('si quien llama cancela, no es culpa del motor: se propaga y no hay enfriamiento', async () => {
@@ -264,8 +270,11 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     const took = performance.now() - t0;
     assert.ok(took < 2500, `respondió en ${Math.round(took)} ms`);
     assert.equal(r.partial, true);
-    assert.match(r.reply, /No alcancé a terminar/);
+    assert.match(r.reply, /El motor de IA no respondió a tiempo/);
+    assert.match(r.reply, /GROQ_MODEL/, 'dice qué hacer');
     assert.equal(r.timing!.llmCalls, 1);
+    assert.equal(r.timing!.ok, 0);
+    assert.ok(r.timing!.lastError, 'el registro lleva el motivo');
   });
 
   test('cada turno informa dónde se fue el tiempo (llamadas, motor, más lenta)', async () => {

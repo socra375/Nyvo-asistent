@@ -4,6 +4,8 @@ export interface Engine { name: string; model: string; llm: Llm; /** Puede trans
 export interface FailoverOpts {
   /** Tiempo máximo de cada intento antes de pasar al siguiente motor. 0 = sin límite. */
   attemptTimeoutMs: number;
+  /** Límite cuando solo hay un motor (no hay a quién pasar): por defecto el doble, mínimo 20 s. 0 = sin límite. */
+  singleEngineLimitMs?: number;
   /** Cuánto se evita un motor tras fallar (se duplica con cada fallo seguido, hasta 10 min). */
   cooldownMs: number;
   now?: () => number;
@@ -48,9 +50,10 @@ export function createFailover(engines: Engine[], opts: FailoverOpts): Llm {
         const e = list[i]!;
         const s = st.get(e.name)!;
         // Límite de tiempo por intento (solo si hay a quién pasar). Temporizador normal, no AbortSignal.timeout: ese no mantiene vivo el proceso.
-        const limit = opts.attemptTimeoutMs > 0 && list.length > 1;
+        const limitMs = list.length > 1 ? opts.attemptTimeoutMs : (opts.singleEngineLimitMs ?? (opts.attemptTimeoutMs > 0 ? Math.max(opts.attemptTimeoutMs * 2, 20_000) : 0));
+        const limit = limitMs > 0;
         const timeout = new AbortController();
-        const timer = limit ? setTimeout(() => timeout.abort(new Error('tiempo agotado')), opts.attemptTimeoutMs) : undefined;
+        const timer = limit ? setTimeout(() => timeout.abort(new Error('tiempo agotado')), limitMs) : undefined;
         const signal = limit ? (req.signal ? AbortSignal.any([req.signal, timeout.signal]) : timeout.signal) : req.signal;
         try {
           const r = await e.llm.generate({ ...req, signal });
@@ -59,7 +62,7 @@ export function createFailover(engines: Engine[], opts: FailoverOpts): Llm {
         } catch (err) {
           if (req.signal?.aborted) throw err;                   // lo canceló quien llamó: no es culpa del motor
           const timedOut = timeout.signal.aborted;
-          const msg = timedOut ? `sin respuesta en ${opts.attemptTimeoutMs} ms` : brief(err);
+          const msg = timedOut ? `sin respuesta en ${limitMs} ms` : brief(err);
           errors.push(`${e.name}: ${msg}`);
           s.lastError = msg; s.lastFailAt = now();
           if (timedOut || isEngineFault(err)) {
