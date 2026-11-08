@@ -48,7 +48,7 @@ export interface Job {
 }
 export interface Note { id: string; content: string; tags: string[]; created_at: string }
 export interface Style { description: string; samples: string[]; updated_at: string | null }
-export interface VoiceConfig { provider: string; missingEnv: string[]; maxChars: number; stt: boolean; wakeWord: string }
+export interface VoiceConfig { provider: string; missingEnv: string[]; maxChars: number; stt: boolean; sttProvider?: string; sttMissing?: string[]; wakeWord: string }
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 export const money = (v: string | undefined) => (v === undefined ? '—' : `${Number(v).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`);

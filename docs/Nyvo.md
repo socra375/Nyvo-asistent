@@ -125,6 +125,7 @@ En esta sesión, en local, con Postgres 16 real:
 | Notion y Google reales | Sin credenciales. Se probó contra imitaciones de sus API |
 | Despliegue en Vercel y Neon | No se crearon cuentas ni proyectos: requieren tu confirmación previa |
 | Palabra clave con voz real | Chromium sin interfaz no reconoce voz. Se probó con un reconocedor simulado. Hay que probarla en Chrome con micrófono |
+| Whisper de Groq real | La red de la sesión no llega a Groq ni hay clave. El formato (`POST /openai/v1/audio/transcriptions`, multipart con `file`, `model`, `language`, `response_format`, `Bearer`; modelo `whisper-large-v3-turbo`) sale de lo que se conoce de su API (compatible con OpenAI), no de la documentación vigente. Se probó contra un servidor falso que imita esa suposición. Hay que probarla con la clave real |
 | Speechify real | No se pudo abrir su documentación (la red de la sesión da 403) ni hay clave desde aquí. El formato de la petición (`POST /v1/audio/speech`, `Bearer`, `{input, voice_id, audio_format, model}` → `audio_data` en base64), la URL base y el modelo `simba-multilingual` salen de lo que se conoce de su API, no de la documentación vigente. Se probó contra un servidor falso que imita esa suposición. Hay que probarla con la clave real |
 | Lectura en voz alta audible | Se verificó la respuesta `audio/wav`, no el sonido |
 | Interrupción con eco real y latencia de voz | El micrófono falso no oye a Nyvo y no hay Gemini real: umbrales y latencia (<1 s no está garantizada) por afinar en un equipo real. Ver [`VOZ.md`](VOZ.md) |

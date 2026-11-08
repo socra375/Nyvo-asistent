@@ -40,7 +40,7 @@ export function OrbScreen({ onActivity, notify, openPanel, logout, jobsActive }:
 
       <button type="button" className="orb-hit" onClick={v.toggle} disabled={!v.sttReady && !v.live}
         aria-pressed={v.live} aria-label={v.live ? 'Detener la conversación por voz' : 'Hablar con Nyvo'}
-        title={v.sttReady ? '' : 'Falta configurar Gemini para usar la voz. Puedes escribirle con el teclado.'}>
+        title={v.sttReady ? '' : 'Falta configurar la transcripción de voz (GROQ_API_KEY). Puedes escribirle con el teclado.'}>
         <Orb state={v.state} sections={v.sections} getLevel={v.getLevel} />
       </button>
 

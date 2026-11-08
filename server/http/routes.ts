@@ -17,6 +17,7 @@ import { cancelJob, listJobs, retryJob } from '../jobs/queue.js';
 import { runTick } from '../jobs/tick.js';
 import * as memory from '../memory/memory.js';
 import { synthesize, voiceMissing, voiceProvider } from '../voice/tts.js';
+import { sttMissing, sttProvider, transcribeWithGroq } from '../voice/stt.js';
 
 interface Ctx { req: Req; res: Res; deps: Deps; params: Record<string, string>; url: URL; user: User }
 type Handler = (c: Ctx) => Promise<void>;
@@ -246,7 +247,7 @@ priv('PUT', '/api/memory/style', async ({ req, res, deps, user }) => {
 
 priv('GET', '/api/voice/config', async ({ res, deps }) => json(res, 200, {
   provider: voiceProvider(deps.cfg), missingEnv: voiceMissing(deps.cfg), maxChars: deps.cfg.limits.ttsMaxChars,
-  stt: Boolean(deps.llm), wakeWord: 'Oye Nyvo'
+  stt: sttProvider(deps.cfg) === 'groq' ? !sttMissing(deps.cfg.env).length : Boolean(deps.llm), sttProvider: sttProvider(deps.cfg), sttMissing: sttProvider(deps.cfg) === 'groq' ? sttMissing(deps.cfg.env) : deps.llm ? [] : sttMissing(deps.cfg.env), wakeWord: 'Oye Nyvo'
 }));
 
 priv('POST', '/api/voice/tts', async ({ req, res, deps, user }) => {
@@ -259,14 +260,18 @@ priv('POST', '/api/voice/tts', async ({ req, res, deps, user }) => {
 
 const AUDIO_TYPES = /^audio\/(webm|ogg|wav|x-wav|mp4|mpeg|aac)(;.*)?$/;
 priv('POST', '/api/voice/stt', async ({ req, res, deps, user }) => {
-  if (!deps.llm) throw new HttpError(503, 'Falta configurar Gemini para transcribir la voz.');
+  const provider = sttProvider(deps.cfg);
+  if (provider === 'groq' ? sttMissing(deps.cfg.env).length : !deps.llm) {
+    throw new HttpError(503, `Falta configurar la transcripción de voz: ${(sttMissing(deps.cfg.env).length ? sttMissing(deps.cfg.env) : ['GROQ_API_KEY']).join(', ')}.`);
+  }
   const body = await readJson(req, Math.ceil(deps.cfg.limits.sttMaxBytes * 1.4));
   const mime = str(body.mimeType, 100, 'tipo de audio');
   if (!AUDIO_TYPES.test(mime)) throw new HttpError(415, 'Formato de audio no admitido.');
   const audio = Buffer.from(str(body.audio, Math.ceil(deps.cfg.limits.sttMaxBytes * 1.4), 'audio'), 'base64');
   if (!audio.length || audio.length > deps.cfg.limits.sttMaxBytes) throw new HttpError(413, 'El audio está vacío o es demasiado largo.');
   if (!(await allowAttempt(deps.db, `stt:${user.id}`, 30, 60))) throw new HttpError(429, 'Demasiadas peticiones de voz. Espera un minuto.');
-  json(res, 200, { text: await deps.llm.transcribe(audio, mime.split(';')[0]!) });
+  const type = mime.split(';')[0]!;
+  json(res, 200, { text: provider === 'groq' ? await transcribeWithGroq(deps.cfg, deps.fetch, audio, type) : await deps.llm!.transcribe(audio, type) });
 });
 
 // ───────────────────────── Despachador ─────────────────────────

@@ -26,9 +26,11 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
     assert.deepEqual(ainova.missingEnv, ['AINOVA_API_URL', 'AINOVA_API_KEY']);
     assert.equal(st.find(c => c.id === 'memoria')!.state, 'listo');
     const voz = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: 'elevenlabs' }), userId)).find(c => c.id === 'voz')!;
-    assert.deepEqual(voz.missingEnv, ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']);
+    assert.deepEqual(voz.missingEnv, ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'GROQ_API_KEY']);
     const spf = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: ' Speechify ' }), userId)).find(c => c.id === 'voz')!;
-    assert.deepEqual(spf.missingEnv, ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID']);
+    assert.deepEqual(spf.missingEnv, ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID', 'GROQ_API_KEY']);
+    const conGroq = (await connectorStatuses(makeDeps(db, { VOICE_PROVIDER: 'speechify', GROQ_API_KEY: 'g' }), userId)).find(c => c.id === 'voz')!;
+    assert.deepEqual(conGroq.missingEnv, ['SPEECHIFY_API_KEY', 'SPEECHIFY_VOICE_ID'], 'con GROQ_API_KEY la escucha está lista');
   });
 
   test('Drive con variables pero sin permiso de Google: «falta conectar»', async () => {

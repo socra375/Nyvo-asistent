@@ -115,6 +115,7 @@ curl -i https://ainova-system.vercel.app/api/v1/tools
 ```
 
 ### 7. Gemini y voz
+0. **Escucha (lo que le hablas a Nyvo):** crea una clave en https://console.groq.com/keys y ponla como `GROQ_API_KEY`. Con ella Nyvo transcribe con Whisper de Groq (`whisper-large-v3-turbo`, español; opcionales `GROQ_STT_MODEL`, `GROQ_STT_LANGUAGE`). Sin ella usa Gemini. **Para pensar y responder Nyvo sigue necesitando Gemini.** El formato de la API de Groq no está verificado contra la API real (ver `docs/Nyvo.md`).
 1. Crea una clave en Google AI Studio → `GEMINI_API_KEY`.
 2. Elige `GEMINI_MODEL`, `GEMINI_TTS_MODEL` y `GEMINI_TTS_VOICE` **según la documentación oficial vigente** (no se fijan por defecto: ver `docs/Nyvo.md`).
 3. Alternativas de voz (solo la síntesis; la transcripción siempre es con Gemini): `VOICE_PROVIDER=speechify` + `SPEECHIFY_API_KEY` + `SPEECHIFY_VOICE_ID` (opcional `SPEECHIFY_MODEL`; por defecto `simba-multilingual`), o `VOICE_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`. La integración con Speechify sigue el formato de su API según se conoce y **no está verificada contra la API real** (ver `docs/Nyvo.md`).
