@@ -72,6 +72,8 @@ test('orbe: teclado → piensa, se enciende la sección que trabaja y llegan sub
     watch();
   });
   await loginOrb(page);
+  await page.getByRole('button', { name: 'Voz', exact: true }).click();   // sin voz: solo texto
+  await expect(page.getByRole('button', { name: 'Voz', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Teclado' }).click();
   await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
   await page.getByRole('button', { name: 'Enviar' }).click();
@@ -82,7 +84,7 @@ test('orbe: teclado → piensa, se enciende la sección que trabaja y llegan sub
   expect(await modes()).toContain('activo');
   await expect.poll(modes, { timeout: 4000 }).toContain('listo');
   await expect(page.getByTestId('sec-johan')).toHaveAttribute('data-mode', 'reposo', { timeout: 6000 });
-  // El texto escrito NO se lee en voz alta si la conversación por voz no está activa.
+  // Con la voz apagada, lo escrito no se lee en voz alta.
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
 
   await page.getByRole('button', { name: 'Subtítulos' }).click();
@@ -95,8 +97,30 @@ test('orbe: teclado → piensa, se enciende la sección que trabaja y llegan sub
   await expect(page.getByTestId('orbscreen')).toBeVisible();
 });
 
+test('orbe: lo que se pide por teclado también se lee en voz alta (voz activada por defecto), sin nombrar las partes internas', async ({ page }) => {
+  await loginOrb(page);
+  await expect(page.getByRole('button', { name: 'Voz', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const tts = page.waitForRequest(r => r.url().endsWith('/api/voice/tts'));
+  await page.getByRole('button', { name: 'Teclado' }).click();
+  await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await tts;                                                     // pidió la voz de la respuesta
+  await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 15_000 });
+  await expect(page.getByTestId('captions')).toContainText('Laura Méndez');
+  await expect(page.getByTestId('captions')).not.toContainText(/Johan|Rose|Mia\b/);   // sin nombrar las partes internas
+  // «Callar» corta la voz y el orbe vuelve al reposo
+  await page.getByRole('button', { name: 'Callar' }).click();
+  await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
+  // Se recuerda la preferencia
+  await page.getByRole('button', { name: 'Voz', exact: true }).click();
+  await page.reload();
+  await expect(page.getByTestId('orbscreen')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Voz', exact: true })).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('orbe: una acción que cambia datos sale como tarjeta sobre el orbe y no se ejecuta sin confirmar', async ({ page }) => {
   await loginOrb(page);
+  await page.getByRole('button', { name: 'Voz', exact: true }).click();   // sin voz: la prueba es de la tarjeta
   await page.getByRole('button', { name: 'Teclado' }).click();
   await page.getByLabel('Mensaje para Nyvo').fill('Marca como pagado el cobro');
   await page.getByRole('button', { name: 'Enviar' }).click();
