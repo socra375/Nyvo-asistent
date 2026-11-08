@@ -128,6 +128,8 @@ test('orbe por voz: escucha, transcribe, responde en voz y se deja interrumpir @
   await page.getByRole('button', { name: 'Hablar con Nyvo' }).click();   // abre el micrófono (el WAV falso empieza a sonar)
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'escuchando');
   await expect(page.getByRole('button', { name: 'Detener la conversación por voz' })).toBeVisible();
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: `${SHOTS}/orbe-escuchando.png` });
 
   // Frase 1 → transcripción → respuesta con datos reales → Nyvo habla.
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 20_000 });

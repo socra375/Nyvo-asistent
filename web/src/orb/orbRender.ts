@@ -1,8 +1,10 @@
-import { SECTIONS, SECTION_RGB, project, type Dynamics, type Graph, type Projected, type RGB } from './orbModel';
+import { SECTIONS, SECTION_RGB, project, waveShape, type Dynamics, type Graph, type Projected, type RGB } from './orbModel';
 
 const scratch: Projected = { sx: 0, sy: 0, depth: 0 };
 const rgba = (c: RGB, a: number) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
 const TEAL: RGB = [70, 190, 200];
+const WARM: RGB = [236, 150, 128];   // tono cálido al hablar
+const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 // Posiciones proyectadas en píxeles (se reutilizan entre fotogramas).
 let PX = new Float32Array(0), PY = new Float32Array(0), PZ = new Float32Array(0);
@@ -20,13 +22,14 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
     PX[i] = cx + scratch.sx * S; PY[i] = cy + scratch.sy * S; PZ[i] = scratch.depth;
   }
 
-  // Brillo turquesa del centro
+  // Brillo del centro: frío (turquesa) al escuchar, cálido al hablar; el cambio es gradual
+  const tone = mix(TEAL, WARM, d.mood);
   const pulse = 0.5 + 0.5 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz);
-  const glowR = S * (0.46 + 0.05 * pulse * d.glow + d.level * 0.18);
+  const glowR = S * (0.46 + 0.035 * pulse * d.glow + d.level * 0.1);
   const glow = c.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-  glow.addColorStop(0, rgba(TEAL, 0.26 + d.glow * 0.12));
-  glow.addColorStop(0.55, rgba([40, 120, 140], 0.14 + d.glow * 0.05));
-  glow.addColorStop(1, rgba([40, 120, 140], 0));
+  glow.addColorStop(0, rgba(tone, 0.24 + d.glow * 0.1 + d.level * 0.06));
+  glow.addColorStop(0.55, rgba(mix([40, 120, 140], [150, 80, 90], d.mood), 0.12 + d.glow * 0.04));
+  glow.addColorStop(1, rgba(mix([40, 120, 140], [150, 80, 90], d.mood), 0));
   c.fillStyle = glow;
   c.fillRect(0, 0, w, h);
 
@@ -116,14 +119,17 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
     c.fillText(nd.label, PX[i]! + size + 4, PY[i]!);
   }
 
-  // Ondas desde el núcleo cuando hay voz
+  // Anillos suaves: salen del núcleo al hablar (cálidos) y entran hacia él al escuchar (fríos); doble trazo para que se difuminen
   for (const wv of d.waves) {
-    c.strokeStyle = rgba(TEAL, wv.a * 0.5);
-    c.lineWidth = 1.5;
-    c.beginPath(); c.arc(cx, cy, wv.r * S, 0, Math.PI * 2); c.stroke();
+    const { r, alpha } = waveShape(wv);
+    const col = wv.dir > 0 ? WARM : TEAL;
+    c.strokeStyle = rgba(col, alpha * 0.3); c.lineWidth = 5 * Math.max(1, U * 1.3);
+    c.beginPath(); c.arc(cx, cy, r * S, 0, Math.PI * 2); c.stroke();
+    c.strokeStyle = rgba(col, alpha); c.lineWidth = 1.2 * Math.max(1, U * 1.3);
+    c.beginPath(); c.arc(cx, cy, r * S, 0, Math.PI * 2); c.stroke();
   }
 
-  // Núcleo: anillo, arco que gira y punto central rosa
+  // Núcleo: anillo, arco que gira y punto central
   const cr = S * 0.045;
   c.strokeStyle = rgba([150, 240, 235], 0.85);
   c.lineWidth = Math.max(1, 1.3 * U * 1.3);
@@ -133,7 +139,7 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
   c.beginPath(); c.arc(cx, cy, cr * 1.65, d.ringPhase, d.ringPhase + Math.PI * 2); c.stroke();
   c.setLineDash([]);
   c.strokeStyle = rgba([200, 255, 250], 0.9);
-  c.beginPath(); c.arc(cx, cy, cr * 2.3, d.ringPhase * 1.4, d.ringPhase * 1.4 + 1.1 + d.level); c.stroke();
+  c.beginPath(); c.arc(cx, cy, cr * 2.3, d.ringPhase * 1.4, d.ringPhase * 1.4 + 1.1 + d.level * 0.5); c.stroke();
   c.fillStyle = rgba([240, 100, 160], 0.95);
-  c.beginPath(); c.arc(cx, cy, cr * (0.36 + 0.25 * pulse * d.glow + d.level * 0.5), 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(cx, cy, cr * (0.36 + 0.14 * pulse * d.glow + d.level * 0.22), 0, Math.PI * 2); c.fill();
 }
