@@ -20,7 +20,11 @@ export function engineOrder(env: Env): EngineDef[] {
   const names = asked.length ? asked : ENGINES.map(e => e.name);
   return [...new Set(names)].flatMap(n => ENGINES.filter(e => e.name === n));
 }
-export const engineConfigured = (env: Env, d: EngineDef) => Boolean(env[d.keyVar] && env[d.modelVar]);
+/** Modelos pedidos para un motor: la variable admite uno o varios separados por coma (se prueban en ese orden). Sin repetidos. */
+export function modelsOf(env: Env, d: EngineDef): string[] {
+  return [...new Set((env[d.modelVar] ?? '').split(',').map(s => s.trim()).filter(Boolean))];
+}
+export const engineConfigured = (env: Env, d: EngineDef) => Boolean(env[d.keyVar] && modelsOf(env, d).length);
 /** ¿Hay al menos un motor listo? */
 export const anyEngineConfigured = (env: Env) => engineOrder(env).some(d => engineConfigured(env, d));
 
@@ -32,10 +36,15 @@ export function buildLlm(cfg: Config, fetchImpl: typeof fetch): Llm | null {
   const engines: Engine[] = [];
   for (const d of engineOrder(env)) {
     if (!engineConfigured(env, d)) continue;
-    const apiKey = env[d.keyVar]!, model = env[d.modelVar]!;
-    if (d.name === 'gemini') engines.push({ name: d.name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl, thinkingBudget: env.GEMINI_THINKING_BUDGET !== undefined && env.GEMINI_THINKING_BUDGET !== '' && Number.isFinite(Number(env.GEMINI_THINKING_BUDGET)) ? Number(env.GEMINI_THINKING_BUDGET) : undefined }) });
-    else if (d.name === 'groq') engines.push({ name: d.name, model, llm: createOpenAiCompat({ name: 'Groq', apiKey, model, baseUrl: `${cfg.urls.groq}/v1`, fetch: fetchImpl }) });
-    else engines.push({ name: d.name, model, llm: createOpenAiCompat({ name: 'OpenRouter', apiKey, model, baseUrl: `${cfg.urls.openrouter}/v1`, fetch: fetchImpl }) });
+    const apiKey = env[d.keyVar]!;
+    const models = modelsOf(env, d);
+    for (const model of models) {
+      // Con varios modelos del mismo proveedor, cada uno es un motor aparte (cuota y enfriamiento propios): «groq:modelo».
+      const name = models.length > 1 ? `${d.name}:${model}` : d.name;
+      if (d.name === 'gemini') engines.push({ name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl, thinkingBudget: env.GEMINI_THINKING_BUDGET !== undefined && env.GEMINI_THINKING_BUDGET !== '' && Number.isFinite(Number(env.GEMINI_THINKING_BUDGET)) ? Number(env.GEMINI_THINKING_BUDGET) : undefined }) });
+      else if (d.name === 'groq') engines.push({ name, model, llm: createOpenAiCompat({ name: 'Groq', apiKey, model, baseUrl: `${cfg.urls.groq}/v1`, fetch: fetchImpl }) });
+      else engines.push({ name, model, llm: createOpenAiCompat({ name: 'OpenRouter', apiKey, model, baseUrl: `${cfg.urls.openrouter}/v1`, fetch: fetchImpl }) });
+    }
   }
   if (!engines.length) return null;
   return createFailover(engines, {
