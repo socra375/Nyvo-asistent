@@ -183,6 +183,6 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
 
   test('sin Gemini el chat responde «falta configurar» sin error', async () => {
     const r = await runTurn(makeDeps(db, {}, { llm: null }), { userId, conversationId: null, message: 'hola' });
-    assert.match(r.reply, /Falta configurar Gemini/);
+    assert.match(r.reply, /Falta configurar un motor de IA/);
   });
 });

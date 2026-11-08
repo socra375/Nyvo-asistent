@@ -8,6 +8,14 @@ export interface Db {
 
 const pools = new Map<string, pg.Pool>();
 
+/**
+ * pg trata sslmode=prefer/require/verify-ca como verify-full y avisa en cada arranque (33 veces en un día en los registros).
+ * Se escribe verify-full explícito: mismo comportamiento, sin ruido.
+ */
+export function normalizeSslMode(url: string): string {
+  return url.replace(/([?&]sslmode=)(prefer|require|verify-ca)(?=&|$)/, '$1verify-full');
+}
+
 function wrap(q: pg.Pool | pg.PoolClient, pool?: pg.Pool): Db {
   return {
     query: (sql, params) => q.query(sql, params as unknown[]),
@@ -34,7 +42,7 @@ export function getDb(url: string): Db {
   let pool = pools.get(url);
   if (!pool) {
     const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
-    pool = new pg.Pool({ connectionString: url, max: 3, ssl: local ? undefined : { rejectUnauthorized: true } });
+    pool = new pg.Pool({ connectionString: normalizeSslMode(url), max: 3, ssl: local ? undefined : { rejectUnauthorized: true } });
     pools.set(url, pool);
   }
   return wrap(pool, pool);

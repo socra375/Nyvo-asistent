@@ -21,10 +21,12 @@ export interface Config {
     elevenlabs: string;
     speechify: string;
     groq: string;
+    openrouter: string;
   };
   limits: {
     ttsMaxChars: number;
     sttMaxBytes: number;
+    turnBudgetMs: number;
     specialistDeadlineMs: number;
     specialistMaxCalls: number;
     jobsTickBudgetMs: number;
@@ -53,11 +55,14 @@ export function loadConfig(env: Env = process.env): Config {
       googleDrive: env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com',
       elevenlabs: env.ELEVENLABS_API_URL ?? 'https://api.elevenlabs.io',
       speechify: env.SPEECHIFY_API_URL ?? 'https://api.sws.speechify.com',
-      groq: (env.GROQ_API_URL ?? 'https://api.groq.com/openai').replace(/\/$/, '')
+      groq: (env.GROQ_API_URL ?? 'https://api.groq.com/openai').replace(/\/$/, ''),
+      openrouter: (env.OPENROUTER_API_URL ?? 'https://openrouter.ai/api').replace(/\/$/, '')
     },
     limits: {
       ttsMaxChars: int(env.TTS_MAX_CHARS, 1500),
       sttMaxBytes: int(env.STT_MAX_BYTES, 3_000_000),
+      /** Plazo total de una respuesta de chat; deja margen bajo el corte de 60 s de Vercel. */
+      turnBudgetMs: int(env.TURN_BUDGET_MS, 50_000),
       specialistDeadlineMs: int(env.SPECIALIST_DEADLINE_MS, 40_000),
       specialistMaxCalls: int(env.SPECIALIST_MAX_CALLS, 8),
       jobsTickBudgetMs: int(env.JOBS_TICK_BUDGET_MS, 45_000)

@@ -37,8 +37,11 @@ export const rateFromMime = (mime: string | undefined) => Number(/rate=(\d+)/.ex
 
 /** Limpia el texto para leerlo en voz alta (sin marcas de formato) y aplica el límite de caracteres. */
 export function prepareSpeech(text: string, maxChars: number): string {
-  const clean = text.replace(/[*_`#>]+/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
-  if (!clean) throw new HttpError(400, 'No hay texto para leer.');
+  const clean = text.replace(/[*_`#>]+/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[<&]/g, m => (m === '&' ? ' y ' : ' '))                 // «<» y «&» pueden confundirse con marcas SSML y hacer que el proveedor rechace el texto
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ')                         // caracteres de control e invisibles
+    .replace(/\s+/g, ' ').trim();
+  if (!/[\p{L}\p{N}]/u.test(clean)) throw new HttpError(400, 'No hay texto para leer.');   // vacío o solo signos: los proveedores lo rechazan
   if (clean.length > maxChars) throw new HttpError(413, `El texto supera el límite de ${maxChars} caracteres por petición.`);
   return clean;
 }
@@ -69,7 +72,11 @@ export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: 
       headers: { Authorization: `Bearer ${env.SPEECHIFY_API_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ input: text, voice_id: env.SPEECHIFY_VOICE_ID, audio_format: 'mp3', model: env.SPEECHIFY_MODEL || 'simba-multilingual' })
     });
-    if (!r.ok) throw new HttpError(502, `Speechify respondió ${r.status}.`);
+    if (!r.ok) {
+      const detail = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+      console.warn('speechify', r.status, detail, `(${text.length} caracteres)`);   // queda en los registros: sin esto un 400 suelto no se puede diagnosticar
+      throw new HttpError(502, `Speechify respondió ${r.status}${detail ? `: ${detail}` : ''}.`);
+    }
     if ((r.headers.get('content-type') ?? '').startsWith('audio/')) return { audio: Buffer.from(await r.arrayBuffer()), mimeType: 'audio/mpeg' };   // por si responde el audio directamente
     const j = await r.json().catch(() => null) as { audio_data?: string } | null;
     if (!j?.audio_data) throw new HttpError(502, 'Speechify no devolvió audio.');

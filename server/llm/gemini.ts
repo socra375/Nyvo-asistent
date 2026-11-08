@@ -1,8 +1,8 @@
-import type { Llm, LlmRequest, LlmResponse, Part } from './types.js';
+import { LlmHttpError, type Llm, type LlmRequest, type LlmResponse, type Part } from './types.js';
 
 export const GEMINI_ENV = ['GEMINI_API_KEY', 'GEMINI_MODEL'] as const;
 
-interface GeminiOpts { apiKey: string; model: string; baseUrl: string; fetch: typeof fetch }
+interface GeminiOpts { apiKey: string; model: string; baseUrl: string; fetch: typeof fetch; /** Tokens de «pensar» (0 = sin pensar, más rápido). Solo se envía si se configura. */ thinkingBudget?: number }
 
 /** Llamada REST a generateContent. La clave va en la cabecera x-goog-api-key, nunca en la URL. */
 export async function geminiGenerate(o: GeminiOpts, model: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -15,7 +15,7 @@ export async function geminiGenerate(o: GeminiOpts, model: string, body: unknown
   });
   if (!r.ok) {
     const detail = await r.text().catch(() => '');
-    throw new Error(`Gemini respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    throw new LlmHttpError(`Gemini respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, r.status);
   }
   return await r.json() as Record<string, unknown>;
 }
@@ -31,7 +31,7 @@ export function createGemini(o: GeminiOpts): Llm {
       const body: Record<string, unknown> = {
         systemInstruction: { parts: [{ text: req.system }] },
         contents: req.turns,
-        generationConfig: { temperature: 0.4 }
+        generationConfig: { temperature: 0.4, ...(o.thinkingBudget !== undefined ? { thinkingConfig: { thinkingBudget: o.thinkingBudget } } : {}) }
       };
       if (req.tools?.length) body.tools = [{ functionDeclarations: req.tools }];
       const parts = partsOf(await geminiGenerate(o, o.model, body, req.signal));

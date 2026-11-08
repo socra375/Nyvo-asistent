@@ -8,9 +8,8 @@ import type { Card } from '../actions/actions.js';
 import { HttpError } from '../http/http.js';
 import { composeMainPrompt } from './brain.js';
 import type { OnEvent } from './events.js';
+import { withTiming, type Timing } from '../llm/timing.js';
 
-/** Plazo total de una respuesta de chat: deja margen bajo el corte de 60 s de Vercel. */
-export const TURN_BUDGET_MS = 50_000;
 const MAX_MAIN_STEPS = 4;
 const HISTORY = 12;
 
@@ -43,6 +42,8 @@ export interface TurnResult {
   cardIds: string[];
   jobIds: string[];
   partial: boolean;
+  /** Dónde se fue el tiempo: llamadas al motor de IA y cuál respondió. */
+  timing?: Timing;
 }
 
 /** Un turno de chat: guarda el mensaje, delega en especialistas y guarda la respuesta (con sus tarjetas). */
@@ -55,12 +56,19 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   await addMessage(deps.db, p.userId, conv.id, 'user', message);
 
   if (!deps.llm) {
-    const reply = 'Falta configurar Gemini (GEMINI_API_KEY y GEMINI_MODEL) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
+    const reply = 'Falta configurar un motor de IA (GEMINI_API_KEY y GEMINI_MODEL, o GROQ_API_KEY y GROQ_MODEL) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
     await addMessage(deps.db, p.userId, conv.id, 'assistant', reply);
     return { conversationId: conv.id, reply, cardIds: [], jobIds: [], partial: false };
   }
 
   const start = Date.now();
+  const budgetMs = deps.cfg.limits.turnBudgetMs;
+  const safety = Math.min(2000, budgetMs / 5);
+  // Plazo duro de TODO el turno: una llamada colgada del motor ya no se queda hasta que Vercel mata la función (60 s).
+  const budget = new AbortController();
+  const budgetTimer = setTimeout(() => budget.abort(), Math.max(1, budgetMs - safety));
+  const timed = withTiming(deps.llm);
+  const d: Deps = { ...deps, llm: timed };
   const turns: Turn[] = history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
   while (turns[0]?.role === 'model') turns.shift(); // el historial debe empezar con el usuario
   turns.push({ role: 'user', parts: [{ text: message }] });
@@ -71,43 +79,55 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   let reply = '';
   let partial = false;
 
-  for (let step = 0; step < MAX_MAIN_STEPS; step++) {
-    const remaining = TURN_BUDGET_MS - (Date.now() - start);
-    if (remaining < 4000) { partial = true; break; }
-    const last = step === MAX_MAIN_STEPS - 1;
-    const resp = await deps.llm.generate({ system, turns, tools: last ? undefined : [DELEGATE] });
-    turns.push({ role: 'model', parts: resp.parts.length ? resp.parts : [{ text: resp.text || '…' }] });
-    if (!resp.calls.length) { reply = resp.text; break; }
-
-    const responses = [];
-    for (const call of resp.calls) {
-      const sp = String(call.args.especialista ?? '') as SpecialistId;
-      const task = String(call.args.tarea ?? '').slice(0, 4000);
-      let response: Record<string, unknown>;
-      if (call.name !== 'delegar' || !(sp in SPECIALISTS) || !task) {
-        response = { error: 'Llamada inválida: usa delegar(especialista, tarea).' };
-      } else if (call.args.en_segundo_plano === true) {
-        const job = await enqueue(deps.db, { userId: p.userId, conversationId: conv.id, kind: 'especialista', title: task.slice(0, 80), payload: { especialista: sp, tarea: task } });
-        jobIds.push(job.id);
-        response = { estado: 'en_segundo_plano', trabajo: job.id, mensaje: 'La tarea quedó en «Trabajos»; el resultado llegará a esta conversación.' };
-      } else {
-        const left = TURN_BUDGET_MS - (Date.now() - start) - 3000;
-        const r = await runSpecialist(deps, { userId: p.userId, conversationId: conv.id, specialist: sp, task, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
-        cards.push(...r.cards);
-        partial ||= r.partial;
-        response = {
-          resultado: r.text, parcial: r.partial,
-          tarjetas: r.cards.map(c => ({ id: c.id, tipo: c.kind === 'confirm' ? 'pendiente_de_confirmacion' : 'hecho_con_opcion_de_deshacer', resumen: c.summary })),
-          no_disponibles: r.unavailable.map(u => `${u.title}: ${u.state}`)
-        };
+  try {
+    for (let step = 0; step < MAX_MAIN_STEPS; step++) {
+      const remaining = budgetMs - (Date.now() - start);
+      if (remaining < Math.min(4000, budgetMs / 5)) { partial = true; break; }
+      const last = step === MAX_MAIN_STEPS - 1;
+      let resp;
+      try {
+        resp = await d.llm!.generate({ system, turns, tools: last ? undefined : [DELEGATE], signal: budget.signal });
+      } catch (e) {
+        if (budget.signal.aborted) { partial = true; break; }   // se acabó el tiempo del turno: se responde con lo que haya
+        throw e;
       }
-      responses.push({ functionResponse: { name: call.name, response } });
+      turns.push({ role: 'model', parts: resp.parts.length ? resp.parts : [{ text: resp.text || '…' }] });
+      if (!resp.calls.length) { reply = resp.text; break; }
+
+      const responses = [];
+      for (const call of resp.calls) {
+        const sp = String(call.args.especialista ?? '') as SpecialistId;
+        const task = String(call.args.tarea ?? '').slice(0, 4000);
+        let response: Record<string, unknown>;
+        if (call.name !== 'delegar' || !(sp in SPECIALISTS) || !task) {
+          response = { error: 'Llamada inválida: usa delegar(especialista, tarea).' };
+        } else if (call.args.en_segundo_plano === true) {
+          const job = await enqueue(deps.db, { userId: p.userId, conversationId: conv.id, kind: 'especialista', title: task.slice(0, 80), payload: { especialista: sp, tarea: task } });
+          jobIds.push(job.id);
+          response = { estado: 'en_segundo_plano', trabajo: job.id, mensaje: 'La tarea quedó en «Trabajos»; el resultado llegará a esta conversación.' };
+        } else {
+          const left = budgetMs - (Date.now() - start) - safety - 1000;
+          const r = await runSpecialist(d, { userId: p.userId, conversationId: conv.id, specialist: sp, task, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
+          cards.push(...r.cards);
+          partial ||= r.partial;
+          response = {
+            resultado: r.text, parcial: r.partial,
+            tarjetas: r.cards.map(c => ({ id: c.id, tipo: c.kind === 'confirm' ? 'pendiente_de_confirmacion' : 'hecho_con_opcion_de_deshacer', resumen: c.summary })),
+            no_disponibles: r.unavailable.map(u => `${u.title}: ${u.state}`)
+          };
+        }
+        responses.push({ functionResponse: { name: call.name, response } });
+      }
+      turns.push({ role: 'user', parts: responses });
     }
-    turns.push({ role: 'user', parts: responses });
+  } finally {
+    clearTimeout(budgetTimer);
   }
 
   if (!reply) reply = partial ? 'No alcancé a terminar todo dentro del tiempo de esta petición. Lo que quedó pendiente puedes pedírmelo de nuevo o en segundo plano.' : 'Listo.';
   if (jobIds.length) deps.defer(import('../jobs/tick.js').then(m => m.runTick(deps)));
   await addMessage(deps.db, p.userId, conv.id, 'assistant', reply, cards.map(c => c.id));
-  return { conversationId: conv.id, reply, cardIds: cards.map(c => c.id), jobIds, partial };
+  const timing = { ...timed.stats(), totalMs: Date.now() - start };
+  console.log('turno', JSON.stringify(timing));   // queda en los registros de Vercel: ahí se ve dónde se fue el tiempo
+  return { conversationId: conv.id, reply, cardIds: cards.map(c => c.id), jobIds, partial, timing };
 }

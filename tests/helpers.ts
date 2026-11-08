@@ -5,7 +5,7 @@ import { getDb, type Db } from '../server/db/pool.js';
 import { migrate } from '../server/db/migrate.js';
 import type { Deps } from '../server/deps.js';
 import type { Llm, LlmRequest, LlmResponse } from '../server/llm/types.js';
-import { createGemini } from '../server/llm/gemini.js';
+import { buildLlm } from '../server/llm/build.js';
 import { handle } from '../server/http/routes.js';
 
 export const TEST_DB = process.env.TEST_DATABASE_URL;
@@ -36,8 +36,7 @@ export function makeDeps(db: Db, env: Env = {}, opts: { llm?: Llm | null; fetch?
   const full: Env = { NYVO_OWNER_EMAIL: OWNER, NYVO_ENC_KEY: ENC_KEY, DATABASE_URL: TEST_DB, ...env };
   const cfg = loadConfig(full);
   const f = opts.fetch ?? fetch;
-  const llm = opts.llm !== undefined ? opts.llm
-    : full.GEMINI_API_KEY && full.GEMINI_MODEL ? createGemini({ apiKey: full.GEMINI_API_KEY, model: full.GEMINI_MODEL, baseUrl: cfg.urls.gemini, fetch: f }) : null;
+  const llm = opts.llm !== undefined ? opts.llm : buildLlm(cfg, f);
   return { cfg, db, fetch: f, llm, defer: p => { deferred.push(p.catch(() => undefined)); } };
 }
 

@@ -1,4 +1,6 @@
 import type { Deps, User } from '../deps.js';
+import { LlmHttpError } from '../llm/types.js';
+import { ENGINES, engineConfigured, engineOrder } from '../llm/build.js';
 import {
   binary, clientIp, HttpError, isSameOriginWrite, isUuid, json, publicOrigin, readJson, redirect, SECURITY_HEADERS, str, type Req, type Res
 } from './http.js';
@@ -182,8 +184,9 @@ priv('POST', '/api/chat/stream', async ({ req, res, deps, user }) => {
     const r = await runTurn(deps, { userId: user.id, conversationId, message, voice: body.voice === true, onEvent: send });
     send({ tipo: 'fin', ...r, cards: await listCards(deps, user.id, { ids: r.cardIds }) });
   } catch (e) {
-    if (!(e instanceof HttpError)) console.error('chat/stream', e instanceof Error ? e.stack : e);
-    send({ tipo: 'error', status: e instanceof HttpError ? e.status : 500, mensaje: e instanceof HttpError ? e.message : 'Error interno.' });
+    if (!(e instanceof HttpError) && !(e instanceof LlmHttpError)) console.error('chat/stream', e instanceof Error ? e.stack : e);
+    const llmDown = e instanceof LlmHttpError;
+    send({ tipo: 'error', status: e instanceof HttpError ? e.status : llmDown ? 503 : 500, mensaje: e instanceof HttpError || llmDown ? e.message : 'Error interno.' });
   }
   res.end();
 });
@@ -241,6 +244,20 @@ priv('GET', '/api/memory/export', async ({ res, deps, user }) => {
 priv('PUT', '/api/memory/style', async ({ req, res, deps, user }) => {
   const body = await readJson(req);
   json(res, 200, { style: await memory.setStyle(deps.db, user.id, str(body.description, 2000, 'descripción', false), body.samples) });
+});
+
+// ───────────────────────── Motores de IA ─────────────────────────
+
+/** Qué motores hay, en qué orden se prueban y cuál está en enfriamiento (sin claves ni valores de las variables). */
+priv('GET', '/api/llm/status', async ({ res, deps }) => {
+  const env = deps.cfg.env;
+  const order = engineOrder(env);
+  json(res, 200, {
+    rotation: order.filter(d => engineConfigured(env, d)).length > 1,
+    order: order.map(d => d.name),
+    engines: deps.llm?.status?.() ?? [],
+    notConfigured: ENGINES.filter(d => !engineConfigured(env, d)).map(d => ({ name: d.name, missingEnv: [d.keyVar, d.modelVar].filter(k => !env[k]) }))
+  });
 });
 
 // ───────────────────────── Voz ─────────────────────────
@@ -301,6 +318,7 @@ export async function handle(req: Req, res: Res, deps: Deps | null): Promise<voi
   } catch (e) {
     if (res.headersSent) { res.end(); return; }
     if (e instanceof HttpError) return json(res, e.status, { error: e.message, code: e.code });
+    if (e instanceof LlmHttpError) return json(res, 503, { error: e.message, code: 'motor_ia' });   // todos los motores de IA fallaron
     console.error('api', e instanceof Error ? e.stack : e);
     json(res, 500, { error: 'Error interno.' });
   }

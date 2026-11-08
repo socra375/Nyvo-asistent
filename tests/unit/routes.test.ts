@@ -162,6 +162,15 @@ describe('API HTTP', needsDb, () => {
     assert.deepEqual([...sp.raw], [0xff, 0xfb, 0x90, 0x00], 'se decodifica el audio base64');
     const spBad = makeDeps(db, { ...env, VOICE_PROVIDER: 'speechify', SPEECHIFY_API_KEY: 'clave-mala', SPEECHIFY_VOICE_ID: 'voz-1' });
     assert.equal((await call(spBad, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 502, 'clave rechazada → error de pasarela, sin filtrar la clave');
+    // Texto con marcas, «&» o caracteres de control: se limpia antes de enviarlo (el proveedor lo rechazaría con 400)
+    assert.equal((await call(speechify, 'POST', '/api/voice/tts', { cookie, body: { text: 'Cobros <b>pendientes</b> & vencidos\u0007 hoy' } })).status, 200);
+    // Solo signos: no se llama al proveedor, 400 claro
+    assert.equal((await call(speechify, 'POST', '/api/voice/tts', { cookie, body: { text: '… ¿? !' } })).status, 400);
+    // Un 400 del proveedor llega con su motivo (sin él no se puede diagnosticar)
+    const rej = await call(speechify, 'POST', '/api/voice/tts', { cookie, body: { text: 'Esto debe RECHAZAR el proveedor' } });
+    assert.equal(rej.status, 502);
+    assert.match(rej.json().error, /Speechify respondió 400: .*texto rechazado por el proveedor/);
+    assert.ok(!rej.body.includes('speechify-falso'), 'sin la clave en el mensaje');
     const noVoice = makeDeps(db, { ...env, GEMINI_TTS_VOICE: '' });
     assert.equal((await call(noVoice, 'POST', '/api/voice/tts', { cookie, body: { text: 'Hola' } })).status, 503);
     const stt = await call(deps, 'POST', '/api/voice/stt', { cookie, body: { audio: Buffer.from('audio').toString('base64'), mimeType: 'audio/webm;codecs=opus' } });

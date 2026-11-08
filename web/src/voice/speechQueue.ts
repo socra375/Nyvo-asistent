@@ -42,10 +42,19 @@ export class SpeechQueue<T> {
       }
     };
     let started = false;
+    let failed = 0;
+    let lastError: unknown;
     try {
       ensure(ahead - 1);
       for (let i = 0; i < chunks.length; i++) {
-        const audio = await pending[i]!;
+        let audio: T;
+        try { audio = await pending[i]!; }
+        catch (e) {
+          if (gen !== this.gen) { hooks.onEnd?.('cancelado'); return; }
+          // Un trozo que el proveedor rechaza no debe callar el resto de la respuesta: se salta y se sigue.
+          failed++; lastError = e; ensure(i + ahead);
+          continue;
+        }
         if (gen !== this.gen) { hooks.onEnd?.('cancelado'); return; }
         ensure(i + ahead);   // al empezar este trozo se piden los siguientes
         if (!started) { started = true; hooks.onStart?.(); }
@@ -55,7 +64,8 @@ export class SpeechQueue<T> {
         this.current = null;
         if (gen !== this.gen) { hooks.onEnd?.('cancelado'); return; }
       }
-      hooks.onEnd?.('fin');
+      if (failed && !started) hooks.onEnd?.('error', lastError);   // no sonó nada: ahora sí es un error
+      else hooks.onEnd?.('fin');
     } catch (e) {
       hooks.onEnd?.(gen !== this.gen ? 'cancelado' : 'error', gen !== this.gen ? undefined : e);
     } finally {
