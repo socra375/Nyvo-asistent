@@ -55,7 +55,7 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   await addMessage(deps.db, p.userId, conv.id, 'user', message);
 
   if (!deps.llm) {
-    const reply = 'Falta configurar Gemini (GEMINI_API_KEY y GEMINI_MODEL) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
+    const reply = 'Falta configurar un motor de IA (GEMINI_API_KEY y GEMINI_MODEL, o GROQ_API_KEY y GROQ_MODEL) en las variables del servidor. Mientras tanto puedes revisar los paneles y los conectores.';
     await addMessage(deps.db, p.userId, conv.id, 'assistant', reply);
     return { conversationId: conv.id, reply, cardIds: [], jobIds: [], partial: false };
   }

@@ -305,7 +305,7 @@ test('sin conectores configurados: cada panel dice qué variable falta, sin erro
   await expect(page.getByText(/Voz: falta configurar GEMINI_API_KEY/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toBeDisabled();
   await sendChat(page, 'hola');
-  await expect(lastAssistant(page)).toContainText('Falta configurar Gemini');
+  await expect(lastAssistant(page)).toContainText('Falta configurar un motor de IA');
   await page.getByTestId('panel-clientes').getByRole('button', { name: 'Ver conectores →' }).click();
   await expect(page.getByTestId('conector-ainova')).toContainText('Falta configurar');
   await expect(page.getByTestId('conector-ainova').getByText('✗ AINOVA_API_URL')).toBeVisible();

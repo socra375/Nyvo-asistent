@@ -7,7 +7,7 @@ export interface Deps {
   cfg: Config;
   db: Db;
   fetch: typeof fetch;
-  /** Modelo de lenguaje, o null si falta configurar Gemini. */
+  /** Motor de IA (con rotación si hay varios), o null si falta configurar alguno. */
   llm: Llm | null;
   /** Continúa trabajo tras responder (waitUntil en Vercel). */
   defer: (p: Promise<unknown>) => void;

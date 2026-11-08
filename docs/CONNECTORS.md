@@ -23,7 +23,7 @@ Cada integración vive en `connectors/<id>/` y exporta un `Connector` (`connecto
 | `notion` · Notion | Documentos | `NOTION_TOKEN`, `NOTION_ROOT_PAGE_ID` | `guardar_nota`, `crear_reporte` (automáticas dentro de «Nyvo», con Deshacer; con `autoGuardar` apagado piden tarjeta), `anexar_a_pagina` (tarjeta), `buscar`, `leer_pagina` | Sí |
 | `google-drive` · Google Drive | Documentos | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NYVO_ENC_KEY` + permiso `drive.metadata.readonly` | `archivos_principales`, `buscar_archivos` | No (solo metadatos) |
 | `memoria` · Memoria | Todos | `DATABASE_URL` | `recordar`, `buscar_memoria` | No (base propia) |
-| `gemini` · Gemini | Núcleo | `GEMINI_API_KEY`, `GEMINI_MODEL` | — (motor del agente y transcripción) | — |
+| `gemini` · Motor de IA | Núcleo | Basta un motor completo (clave + modelo), con rotación si hay varios: Gemini (`GEMINI_API_KEY`, `GEMINI_MODEL`) · Groq (`GROQ_API_KEY`, `GROQ_MODEL`) · OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`). Opcionales: `LLM_PROVIDERS`, `LLM_ATTEMPT_TIMEOUT_MS`, `LLM_COOLDOWN_MS` | — (`/api/llm/status`) | — |
 | `voz` · Voz | Núcleo | Escucha: `GROQ_API_KEY` (Whisper) o, sin ella, Gemini · Síntesis: Gemini: `GEMINI_API_KEY`, `GEMINI_TTS_MODEL`, `GEMINI_TTS_VOICE` · Speechify (`VOICE_PROVIDER=speechify`): `SPEECHIFY_API_KEY`, `SPEECHIFY_VOICE_ID` · ElevenLabs (`VOICE_PROVIDER=elevenlabs`): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | — (`/api/voice/tts`, `/api/voice/stt`) | — |
 
 Variables del núcleo (no de un conector): `DATABASE_URL`, `NYVO_OWNER_EMAIL`, `NYVO_ENC_KEY`, `APP_URL`, `CRON_SECRET`. Detalle y comentarios en [`.env.example`](../.env.example).

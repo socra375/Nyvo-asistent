@@ -7,6 +7,7 @@
  * - /google/...         → OAuth de Google (auth + token) y Drive v3 (files.list)
  * - /gemini/v1beta/models/:m:generateContent → Gemini (agente guionizado, TTS y transcripción)
  * - /eleven/v1/text-to-speech/:voice → ElevenLabs
+ * - /groq/openai/v1/chat/completions → Groq como motor de IA (formato OpenAI; traduce al guion de Gemini y vuelve)
  * - /groq/openai/v1/audio/transcriptions → Whisper de Groq (multipart; formato supuesto, no verificado con la API real)
  * - /speechify/v1/audio/speech → Speechify (según el formato supuesto en server/voice/tts.ts; no verificado con la API real)
  */
@@ -30,6 +31,11 @@ export interface FakeState {
   driveFiles: { id: string; name: string; mimeType: string; modifiedTime: string; webViewLink: string; starred: boolean }[];
   googleEmail: string;
   geminiRequests: { model: string; body: Record<string, unknown> }[];
+  /** Si se pone un código, Gemini responde con ese error (caída, cuota…). */
+  geminiFail: number | null;
+  /** Peticiones a «chat/completions» de Groq (formato OpenAI) y fallo forzado. */
+  groqRequests: Record<string, unknown>[];
+  groqFail: number | null;
   /** Una entrada por petición a la API de AINova: «GET tools» (lista) o «POST <herramienta>». */
   apiCalls: string[];
   ainova: { rateLimited: boolean; revoked: boolean };
@@ -54,6 +60,7 @@ export function initialState(googleEmail = 'ianovasystem3@gmail.com'): FakeState
     ],
     googleEmail,
     geminiRequests: [],
+    geminiFail: null, groqRequests: [], groqFail: null,
     apiCalls: [],
     ainova: { rateLimited: false, revoked: false },
     leakHits: 0
@@ -292,6 +299,37 @@ export function fakeGemini(b: Record<string, unknown>): unknown {
   return say('No tengo herramientas para esa tarea: falta configurar el conector.');
 }
 
+/** Groq/OpenAI «chat/completions» → forma de Gemini, para reutilizar el guion. Devuelve un texto si la petición es inválida (p. ej. una herramienta sin su llamada). */
+function fromOpenAi(b: Record<string, unknown>): Record<string, unknown> | string {
+  type M = { role: string; content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string };
+  const ids = new Map<string, string>();
+  const contents: GTurn[] = [];
+  for (const m of (b.messages ?? []) as M[]) {
+    if (m.role === 'system') continue;
+    if (m.role === 'user') contents.push({ role: 'user', parts: [{ text: m.content ?? '' }] });
+    else if (m.role === 'assistant') {
+      const parts: GPart[] = [];
+      if (m.content) parts.push({ text: m.content });
+      for (const c of m.tool_calls ?? []) { ids.set(c.id, c.function.name); parts.push({ functionCall: { name: c.function.name, args: JSON.parse(c.function.arguments) } }); }
+      contents.push({ role: 'model', parts });
+    } else if (m.role === 'tool') {
+      const name = ids.get(m.tool_call_id ?? '');
+      if (!name) return `tool_call_id desconocido: ${m.tool_call_id}`;
+      const part: GPart = { functionResponse: { name, response: JSON.parse(m.content ?? '{}') } };
+      const last = contents[contents.length - 1];
+      if (last?.role === 'user' && last.parts.every(p => p.functionResponse)) last.parts.push(part); else contents.push({ role: 'user', parts: [part] });
+    }
+  }
+  const tools = (b.tools ?? []) as { type: string; function: { name: string; parameters?: { type?: string } } }[];
+  if (tools.some(t => t.type !== 'function' || t.function.parameters?.type !== 'object')) return 'esquema de herramienta inválido';
+  return { contents, ...(tools.length ? { tools: [{ functionDeclarations: tools.map(t => ({ name: t.function.name })) }] } : {}) };
+}
+function toOpenAi(g: { candidates: { content: { parts: GPart[] } }[] }) {
+  const parts = g.candidates[0]!.content.parts;
+  const calls = parts.filter(p => p.functionCall);
+  return { choices: [{ message: { role: 'assistant', content: parts.map(p => p.text ?? '').join('') || null, ...(calls.length ? { tool_calls: calls.map((c, i) => ({ id: `fake_${i}`, type: 'function', function: { name: c.functionCall!.name, arguments: JSON.stringify(c.functionCall!.args) } })) } : {}) } }] };
+}
+
 // ───────── servidor ─────────
 export interface Upstream { url: string; state: FakeState; close: () => Promise<void>; server: Server }
 
@@ -317,12 +355,22 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         if (!req.headers['x-goog-api-key']) return send(res, 401, { error: { message: 'API key missing' } });
         const b = JSON.parse(await body(req)) as Record<string, unknown>;
         state.geminiRequests.push({ model: decodeURIComponent(g[1]!), body: b });
+        if (state.geminiFail) return send(res, state.geminiFail, { error: { message: 'fallo simulado' } });
         return send(res, 200, fakeGemini(b));
       }
       if (/^\/eleven\/v1\/text-to-speech\//.test(url.pathname)) {
         if (!req.headers['xi-api-key']) return send(res, 401, {});
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
         return res.end(Buffer.from([0xff, 0xfb, 0x90, 0x00]));
+      }
+      if (url.pathname === '/groq/openai/v1/chat/completions') {
+        if (req.headers.authorization !== 'Bearer groq-falso') return send(res, 401, { error: { message: 'Invalid API Key' } });
+        const b = JSON.parse(await body(req)) as Record<string, unknown>;
+        state.groqRequests.push(b);
+        if (state.groqFail) return send(res, state.groqFail, { error: { message: 'fallo simulado' } });
+        const conv = fromOpenAi(b);
+        if (typeof conv === 'string') return send(res, 400, { error: { message: conv } });
+        return send(res, 200, toOpenAi(fakeGemini(conv) as { candidates: { content: { parts: GPart[] } }[] }));
       }
       if (url.pathname === '/groq/openai/v1/audio/transcriptions') {
         if (req.headers.authorization !== 'Bearer groq-falso') return send(res, 401, { error: { message: 'Invalid API Key' } });

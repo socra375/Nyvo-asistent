@@ -28,7 +28,14 @@ export interface LlmRequest {
   signal?: AbortSignal;
 }
 
+/** Error de un proveedor de IA con su código HTTP (si lo hubo). Sin código = fallo de red o de tiempo. */
+export class LlmHttpError extends Error {
+  constructor(message: string, public status?: number) { super(message); }
+}
+
 export interface LlmResponse {
+  /** Motor que respondió (cuando hay varios en rotación). */
+  engine?: string;
   text: string;
   calls: { name: string; args: Record<string, unknown> }[];
   /** Partes tal cual, para devolverlas al historial. */
@@ -39,6 +46,22 @@ export interface Llm {
   generate(req: LlmRequest): Promise<LlmResponse>;
   /** Transcribe audio (voz a texto). */
   transcribe(audio: Buffer, mimeType: string, signal?: AbortSignal): Promise<string>;
+  /** Estado de cada motor (solo en la rotación). */
+  status?(): EngineStatus[];
+}
+
+export interface EngineStatus {
+  name: string;
+  model: string;
+  state: 'ok' | 'enfriamiento';
+  /** Fallos seguidos desde el último acierto. */
+  failures: number;
+  /** Hasta cuándo se evita este motor (ISO), o null. */
+  downUntil: string | null;
+  lastError: string | null;
+  lastOkAt: string | null;
+  lastFailAt: string | null;
+  answered: number;
 }
 
 const TYPES = new Set(['object', 'string', 'number', 'integer', 'boolean', 'array']);

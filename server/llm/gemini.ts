@@ -1,4 +1,4 @@
-import type { Llm, LlmRequest, LlmResponse, Part } from './types.js';
+import { LlmHttpError, type Llm, type LlmRequest, type LlmResponse, type Part } from './types.js';
 
 export const GEMINI_ENV = ['GEMINI_API_KEY', 'GEMINI_MODEL'] as const;
 
@@ -15,7 +15,7 @@ export async function geminiGenerate(o: GeminiOpts, model: string, body: unknown
   });
   if (!r.ok) {
     const detail = await r.text().catch(() => '');
-    throw new Error(`Gemini respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    throw new LlmHttpError(`Gemini respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, r.status);
   }
   return await r.json() as Record<string, unknown>;
 }
