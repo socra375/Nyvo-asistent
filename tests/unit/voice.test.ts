@@ -1,11 +1,11 @@
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { Vad, type VadEvent } from '../../web/src/voice/vad.js';
 import { bytesToBase64, concat, downsample, encodeWav, PreRoll, rms } from '../../web/src/voice/wav.js';
 import { chunkForSpeech } from '../../web/src/voice/chunker.js';
 import { SpeechQueue, type Playing } from '../../web/src/voice/speechQueue.js';
 import { stepConversation, type ConvEvent, type ConvState } from '../../web/src/voice/conversation.js';
-import { approach, createDynamics, createGraph, HUBS, project, SECTIONS, SECTION_RGB, stepDynamics, type Hemi, type SectionMode } from '../../web/src/orb/orbModel.js';
+import { approach, createDynamics, createGraph, HUBS, project, SECTIONS, SECTION_RGB, stepDynamics, waveShape, type Hemi, type SectionMode } from '../../web/src/orb/orbModel.js';
 
 const BLOCK_MS = 21;
 /** Alimenta el VAD con un nivel constante durante `ms` y devuelve los eventos con su instante. */
@@ -295,5 +295,86 @@ test('orbe: la dinámica es suave, depende del estado, respeta «reducir movimie
   const sweep = run('pensando', idle, 1.3);
   assert.ok(SECTIONS.filter(s => sweep.act[s] > 0.4).length >= 1, 'pensando sin herramienta recorre los clústeres');
   const speaking = run('hablando', idle, 2, 0.8);
-  assert.ok(speaking.waves.length > 0 && speaking.waves.length <= 6, 'ondas desde el núcleo al hablar');
+  assert.ok(speaking.waves.length > 0 && speaking.waves.length <= 3, 'anillos desde el núcleo al hablar, pocos a la vez');
+});
+
+describe('escuchar y hablar: suaves y distintos', () => {
+  const g = createGraph(300);
+  const idle: Record<Hemi, SectionMode> = { rose: 'reposo', johan: 'reposo', mia: 'reposo', nyvo: 'reposo' };
+  const FPS = 1 / 60;
+  const run = (mode: 'escuchando' | 'hablando' | 'reposo', seconds: number, level: (i: number) => number, d = createDynamics()) => {
+    for (let i = 0; i < seconds * 60; i++) stepDynamics(d, FPS, { mode, sections: idle, level: level(i) }, g);
+    return d;
+  };
+
+  test('un pico de audio de un fotograma casi no mueve el orbe', () => {
+    const d = createDynamics();
+    stepDynamics(d, FPS, { mode: 'hablando', sections: idle, level: 1 }, g);
+    assert.ok(d.level < 0.12, `nivel tras un fotograma a tope: ${d.level.toFixed(3)}`);
+    assert.ok(Math.abs(d.swell) < 0.002);
+  });
+
+  test('un micrófono ruidoso (0/1 alternando cada fotograma) no hace temblar nada', () => {
+    for (const mode of ['escuchando', 'hablando'] as const) {
+      const d = run(mode, 2, () => 0.5);
+      const levels: number[] = [], swells: number[] = [];
+      for (let i = 0; i < 60; i++) { stepDynamics(d, FPS, { mode, sections: idle, level: i % 2 ? 1 : 0 }, g); levels.push(d.level); swells.push(d.swell); }
+      const p2p = (a: number[]) => Math.max(...a) - Math.min(...a);
+      assert.ok(p2p(levels) < 0.12, `${mode}: el nivel oscila ${p2p(levels).toFixed(3)}`);
+      assert.ok(p2p(swells) < 0.004, `${mode}: la respiración oscila ${p2p(swells).toFixed(4)}`);
+    }
+  });
+
+  test('escuchar inhala (se recoge, anillos que entran, tono frío); hablar exhala (se expande, anillos que salen, tono cálido)', () => {
+    const listen = run('escuchando', 4, () => 0.6);
+    const speak = run('hablando', 4, () => 0.6);
+    assert.ok(listen.swell < 0 && speak.swell > 0, 'direcciones opuestas');
+    assert.ok(Math.abs(listen.swell) <= 0.03 && speak.swell <= 0.04, 'amplitud pequeña');
+    assert.ok(listen.mood < 0.05 && speak.mood > 0.9, 'frío al escuchar, cálido al hablar');
+    assert.ok(listen.waves.length > 0 && listen.waves.every(w => w.dir === -1));
+    assert.ok(speak.waves.length > 0 && speak.waves.every(w => w.dir === 1));
+    assert.ok(speak.spin > listen.spin, 'hablando gira algo más que escuchando');
+  });
+
+  test('el cambio de tono entre escuchar y hablar es gradual', () => {
+    const d = run('hablando', 3, () => 0.6);
+    const before = d.mood;
+    stepDynamics(d, FPS, { mode: 'escuchando', sections: idle, level: 0.6 }, g);
+    assert.ok(before - d.mood < 0.05, 'en un fotograma cambia muy poco');
+    run('escuchando', 3, () => 0.6, d);
+    assert.ok(d.mood < 0.05, 'y al final queda frío');
+  });
+
+  test('los anillos aparecen y se apagan con suavidad; salen o entran según su dirección', () => {
+    for (const dir of [1, -1] as const) {
+      assert.equal(waveShape({ t: 0, amp: 1, dir }).alpha, 0);
+      assert.ok(Math.abs(waveShape({ t: 1, amp: 1, dir }).alpha) < 1e-9);
+      const mid = waveShape({ t: 0.5, amp: 1, dir });
+      assert.ok(mid.alpha > 0.2 && mid.alpha <= 0.28, 'discretos: nunca más de 0,28 de opacidad');
+    }
+    assert.ok(waveShape({ t: 0.8, amp: 1, dir: 1 }).r > waveShape({ t: 0.2, amp: 1, dir: 1 }).r, 'al hablar crece');
+    assert.ok(waveShape({ t: 0.8, amp: 1, dir: -1 }).r < waveShape({ t: 0.2, amp: 1, dir: -1 }).r, 'al escuchar se encoge');
+  });
+
+  test('sin movimiento (preferencia del sistema): no hay anillos y la respiración se reduce', () => {
+    const d = createDynamics();
+    for (let i = 0; i < 4 * 60; i++) stepDynamics(d, FPS, { mode: 'hablando', sections: idle, level: 0.8, reducedMotion: true }, g);
+    assert.equal(d.waves.length, 0);
+    const full = run('hablando', 4, () => 0.8);
+    assert.ok(d.swell < full.swell * 0.5);
+  });
+
+  test('el nivel de audio ya no entra por nodo: con la misma respiración global, el nivel no cambia ninguna posición (sin temblor por punto)', () => {
+    const a = run('hablando', 3, () => 0.8);
+    const b = { ...a, level: 0, waves: [], pulses: [] };
+    const pa = { sx: 0, sy: 0, depth: 0 }, pb = { sx: 0, sy: 0, depth: 0 };
+    for (const n of g.nodes.slice(0, 120)) {
+      project(n, a, pa); project(n, b, pb);
+      assert.equal(pa.sx, pb.sx); assert.equal(pa.sy, pb.sy);
+    }
+    // y la respiración global sí mueve a todos en el mismo sentido (hablando: se alejan del centro)
+    const quiet = { ...a, swell: 0 };
+    const out = g.nodes.slice(0, 120).filter(n => { project(n, a, pa); project(n, quiet, pb); return Math.hypot(pa.sx, pa.sy) >= Math.hypot(pb.sx, pb.sy); }).length;
+    assert.equal(out, 120);
+  });
 });

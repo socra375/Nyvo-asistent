@@ -134,23 +134,34 @@ export interface Targets { spin: number; ring: number; glow: number; pulseHz: nu
 /** Hacia dónde tiende la animación en cada estado (spawn = señales por segundo que recorren las aristas). */
 export const TARGETS: Record<Mode, Targets> = {
   reposo:     { spin: 0.30, ring: 0.25, glow: 0.55, pulseHz: 0.25, reach: 0.00, spawn: 1.2 },
-  escuchando: { spin: 0.40, ring: 0.45, glow: 0.75, pulseHz: 0.50, reach: 0.30, spawn: 3 },
-  pensando:   { spin: 1.00, ring: 1.60, glow: 0.90, pulseHz: 1.60, reach: 0.10, spawn: 16 },
-  hablando:   { spin: 0.50, ring: 0.60, glow: 1.00, pulseHz: 0.80, reach: 0.60, spawn: 7 }
+  escuchando: { spin: 0.26, ring: 0.30, glow: 0.70, pulseHz: 0.30, reach: 0.00, spawn: 1.5 },
+  pensando:   { spin: 1.00, ring: 1.60, glow: 0.90, pulseHz: 1.60, reach: 0.00, spawn: 16 },
+  hablando:   { spin: 0.38, ring: 0.45, glow: 0.95, pulseHz: 0.45, reach: 0.00, spawn: 3 }
 };
 
 export interface Pulse { edge: number; t: number; speed: number; sec: Hemi; dir: 1 | -1 }
-export interface Wave { r: number; a: number }
+/** Anillo suave desde/hacia el núcleo. dir 1: sale (habla); dir -1: entra (escucha). t va de 0 a 1 durante su vida. */
+export interface Wave { t: number; amp: number; dir: 1 | -1 }
+const WAVE_LIFE = { out: 2.6, in: 2.2 };   // segundos
+/** Radio (unidades de escena) y opacidad de un anillo: aparece y se apaga con suavidad (seno), nunca de golpe. */
+export function waveShape(w: Wave): { r: number; alpha: number } {
+  const e = w.t * w.t * (3 - 2 * w.t);   // suavizado de entrada y salida
+  return { r: w.dir > 0 ? 0.06 + e * 1.0 : 1.0 - e * 0.94, alpha: w.amp * Math.sin(Math.PI * w.t) * 0.28 };
+}
 const MAX_PULSES = 70;
-const MAX_WAVES = 6;
+const MAX_WAVES = 3;
 
 export interface Dynamics {
   mode: Mode;
   /** Ángulo de giro acumulado (rad): una vuelta completa son 2π; no se reinicia. */
   yaw: number; ringPhase: number; clock: number;
   spin: number; ring: number; glow: number; pulseHz: number; reach: number; spawn: number;
-  /** Nivel de audio suavizado 0..1. */
+  /** Nivel de audio suavizado 0..1 (sube y baja despacio: la voz no hace temblar al orbe). */
   level: number;
+  /** Respiración global del orbe: negativo al escuchar (inhala, se recoge), positivo al hablar (exhala, se expande). */
+  swell: number;
+  /** 0 = tono frío (escucha), 1 = tono cálido (habla); cambia con suavidad. */
+  mood: number;
   /** Activación suavizada de cada sección 0..1 (0 = reposo). */
   act: Record<Hemi, number>;
   /** Sección que «recorre» el orbe mientras piensa sin herramienta activa. */
@@ -162,7 +173,7 @@ export interface Dynamics {
 }
 
 export const createDynamics = (): Dynamics => ({
-  mode: 'reposo', yaw: 0.35, ringPhase: 0, clock: 0, ...TARGETS.reposo, level: 0,
+  mode: 'reposo', yaw: 0.35, ringPhase: 0, clock: 0, ...TARGETS.reposo, level: 0, swell: 0, mood: 0,
   act: { rose: 0, johan: 0, mia: 0, nyvo: 0 }, sweep: 0, pulses: [], waves: [], spawnAcc: 0, waveAcc: 0
 });
 
@@ -183,7 +194,13 @@ export function stepDynamics(d: Dynamics, dt: number, inp: StepInput, graph?: Gr
   d.pulseHz = approach(d.pulseHz, t.pulseHz * calm, dt, 0.5);
   d.reach = approach(d.reach, t.reach, dt, 0.4);
   d.spawn = approach(d.spawn, t.spawn * calm, dt, 0.5);
-  d.level = approach(d.level, inp.level, dt, inp.level > d.level ? 0.05 : 0.18);   // sube rápido, baja despacio
+  // El nivel se comprime (raíz) y se suaviza mucho: sube en ~0,2 s y baja en ~0,5 s, sin saltos de un fotograma a otro.
+  const target = Math.sqrt(Math.max(0, Math.min(1, inp.level)));
+  d.level = approach(d.level, target, dt, target > d.level ? 0.2 : 0.5);
+  // Respiración: al escuchar el orbe se recoge un poco; al hablar se expande. Amplitud pequeña y muy suavizada.
+  const swellTarget = inp.mode === 'hablando' ? d.level * 0.032 : inp.mode === 'escuchando' ? -d.level * 0.02 : 0;
+  d.swell = approach(d.swell, inp.reducedMotion ? swellTarget * 0.3 : swellTarget, dt, 0.35);
+  d.mood = approach(d.mood, inp.mode === 'hablando' ? 1 : 0, dt, 0.7);
   d.yaw += d.spin * dt;
   d.ringPhase += d.ring * dt;
   d.clock += dt;
@@ -201,13 +218,14 @@ export function stepDynamics(d: Dynamics, dt: number, inp: StepInput, graph?: Gr
     d.act[s] = approach(d.act[s], target, dt, target > d.act[s] ? 0.18 : 0.45);
   }
 
-  // Ondas desde el núcleo mientras hay voz (la tuya o la de Nyvo).
+  // Anillos lentos: al hablar salen del núcleo; al escuchar entran hacia él. Uno cada poco, nunca a ráfagas.
   d.waveAcc += dt;
-  if ((inp.mode === 'hablando' || inp.mode === 'escuchando') && inp.level > 0.12 && d.waveAcc > 0.32 && d.waves.length < MAX_WAVES && !inp.reducedMotion) {
-    d.waves.push({ r: 0.05, a: Math.min(1, inp.level * 1.4) }); d.waveAcc = 0;
+  const ringEvery = inp.mode === 'hablando' ? 1.4 : inp.mode === 'escuchando' ? 1.8 : Infinity;
+  if (d.waveAcc > ringEvery && d.level > 0.08 && d.waves.length < MAX_WAVES && !inp.reducedMotion) {
+    d.waves.push({ t: 0, amp: Math.min(1, 0.35 + d.level), dir: inp.mode === 'hablando' ? 1 : -1 }); d.waveAcc = 0;
   }
-  for (const w of d.waves) { w.r += dt * 0.85; w.a -= dt * 0.9; }
-  d.waves = d.waves.filter(w => w.a > 0);
+  for (const w of d.waves) w.t += dt / (w.dir > 0 ? WAVE_LIFE.out : WAVE_LIFE.in);
+  d.waves = d.waves.filter(w => w.t < 1);
 
   // Señales que recorren las aristas: más al pensar y concentradas en la sección que trabaja.
   if (graph && graph.edges.length) {
@@ -238,7 +256,8 @@ export function project(p: GNode, d: Dynamics, out: Projected): Projected {
   const ct = Math.cos(tilt), st = Math.sin(tilt);
   const y2 = p.y * ct - z1 * st;
   const z2 = p.y * st + z1 * ct;
-  const push = 1 + d.level * d.reach * 0.07 * (0.5 + 0.5 * Math.sin(p.seed + d.clock * 5)) + 0.012 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz + p.seed);
+  // Respiración global (igual para todos los nodos: se mueve como un cuerpo, no como ruido) + un latido mínimo y lento por nodo.
+  const push = 1 + d.swell + 0.008 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz + p.seed);
   const persp = 1 / (1 - z2 * 0.16);
   out.sx = x1 * push * persp;
   out.sy = y2 * push * persp;
