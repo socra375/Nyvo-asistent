@@ -1,6 +1,6 @@
 import type { Llm } from './types.js';
 
-export interface Timing { llmCalls: number; /** Llamadas que sí devolvieron respuesta. */ ok: number; llmMs: number; engines: string[]; slowestMs: number; /** Último fallo de un motor en este turno (para el registro). */ lastError?: string; totalMs?: number }
+export interface Timing { llmCalls: number; /** Llamadas que sí devolvieron respuesta. */ ok: number; llmMs: number; engines: string[]; slowestMs: number; /** Último fallo de un motor en este turno (para el registro). */ lastError?: string; totalMs?: number; /** Camino del turno: «rapida» (directo al especialista), «directa» (el principal no vuelve a redactar) o «completa». */ via?: string }
 
 /** Mide cuánto tarda el motor de IA en un turno (llamadas, tiempo total y la más lenta) sin cambiar su comportamiento. */
 export function withTiming(llm: Llm): Llm & { stats(): Timing } {
