@@ -22,7 +22,7 @@ export interface Card {
 const COLS = 'id, kind, connector_id, tool, args, summary, status, result, error, expires_at, created_at';
 
 /** Campos de un resultado que sirven para el historial y el soporte (identificadores), nunca datos de clientes. */
-const KEEP_IN_RESULT = ['id', 'pageId', 'url', 'number', 'status', 'estado', 'seccion'] as const;
+const KEEP_IN_RESULT = ['id', 'pageId', 'ruta', 'url', 'number', 'status', 'estado', 'seccion'] as const;
 
 /**
  * Lo que se guarda del resultado de una herramienta: solo identificadores y el tamaño. Nada del contenido.

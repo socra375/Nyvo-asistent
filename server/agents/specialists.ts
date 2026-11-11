@@ -11,7 +11,7 @@ export type SpecialistId = 'negocios' | 'documentos' | 'navegador' | 'habilidade
 
 export const SPECIALISTS: Record<SpecialistId, { title: string; role: Role; description: string; availableFrom?: string }> = {
   negocios: { title: 'Negocios', role: 'negocios', description: 'Clientes, proyectos, cobros, servicios y conversaciones con clientes (panel de AINova).' },
-  documentos: { title: 'Documentos', role: 'documentos', description: 'Notion (guardar notas, crear reportes, buscar información) y Google Drive (archivos principales).' },
+  documentos: { title: 'Documentos', role: 'documentos', description: 'Segundo cerebro en Obsidian (recordar y consultar lo que el dueño cuenta), Notion (reportes y documentos para compartir) y Google Drive (archivos principales).' },
   navegador: { title: 'Navegador', role: 'navegador', description: 'Entrar a sitios web y completar formularios sin API.', availableFrom: 'fase 4' },
   habilidades: { title: 'Habilidades', role: 'habilidades', description: 'Habilidades instaladas desde GitHub (SKILL.md).', availableFrom: 'fase 2' }
 };
@@ -33,6 +33,8 @@ export interface SpecialistResult {
 }
 
 const MAX_RESULT_CHARS = 12_000;
+/** Las claves que empiezan por «_» son para uso interno (p. ej. el texto anterior para deshacer): no se le muestran al modelo. */
+const stripPrivate = (v: unknown): unknown => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !k.startsWith('_'))) : v);
 const clip = (v: unknown) => {
   const s = JSON.stringify(v ?? null);
   return s.length > MAX_RESULT_CHARS ? { truncado: true, json: s.slice(0, MAX_RESULT_CHARS) } : v;
@@ -116,6 +118,7 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
 
 async function execute(deps: Deps, p: { userId: string; conversationId: string | null }, b: BoundTool, args: Record<string, unknown>, cards: Card[]): Promise<Record<string, unknown>> {
   const t = b.tool;
+  t.validate?.(args);
   const summary = t.summarize?.(args) ?? `${b.connectorId} · ${t.name}`;
   if (t.mutates && !(t.autoApprove?.(b.ctx, args) ?? false)) {
     const card = await createConfirmCard(deps, { userId: p.userId, conversationId: p.conversationId, connectorId: b.connectorId, tool: t.name, args, summary });
@@ -126,7 +129,7 @@ async function execute(deps: Deps, p: { userId: string; conversationId: string |
   if (t.mutates) {
     const undo = t.undoInfo?.(result) ?? null;
     if (undo) cards.push(await createUndoCard(deps, { userId: p.userId, conversationId: p.conversationId, connectorId: b.connectorId, tool: t.name, args, summary, result, undo }));
-    return { estado: 'hecho', resultado: clip(result) as unknown };
+    return { estado: 'hecho', resultado: clip(stripPrivate(result)) as unknown };
   }
   return { resultado: clip(result) as unknown };
 }
