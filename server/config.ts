@@ -23,7 +23,6 @@ export interface Config {
     groq: string;
     openrouter: string;
     cerebras: string;
-    github: string;
   };
   limits: {
     ttsMaxChars: number;
@@ -59,8 +58,7 @@ export function loadConfig(env: Env = process.env): Config {
       speechify: env.SPEECHIFY_API_URL ?? 'https://api.sws.speechify.com',
       groq: (env.GROQ_API_URL ?? 'https://api.groq.com/openai').replace(/\/$/, ''),
       openrouter: (env.OPENROUTER_API_URL ?? 'https://openrouter.ai/api').replace(/\/$/, ''),
-      cerebras: (env.CEREBRAS_API_URL ?? 'https://api.cerebras.ai').replace(/\/$/, ''),
-      github: (env.OBSIDIAN_API_URL ?? 'https://api.github.com').replace(/\/$/, '')
+      cerebras: (env.CEREBRAS_API_URL ?? 'https://api.cerebras.ai').replace(/\/$/, '')
     },
     limits: {
       ttsMaxChars: int(env.TTS_MAX_CHARS, 1500),

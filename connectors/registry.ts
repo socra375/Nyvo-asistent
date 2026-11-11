@@ -5,14 +5,13 @@ import { googleScopes } from '../server/auth/google.js';
 import { llmName } from '../server/llm/types.js';
 import { ainova } from './ainova/index.js';
 import { notionConnector } from './notion/index.js';
-import { obsidianConnector } from './obsidian/index.js';
 import { googleDrive } from './google-drive/index.js';
 import { memoria } from './memoria/index.js';
 import { gemini } from './gemini/index.js';
 import { voz } from './voz/index.js';
 
 /** Todos los conectores de la fase 1. Para añadir uno: crear connectors/<id>/ y sumarlo aquí. */
-export const CONNECTORS: readonly Connector[] = [ainova, notionConnector, obsidianConnector, googleDrive, memoria, gemini, voz];
+export const CONNECTORS: readonly Connector[] = [ainova, notionConnector, googleDrive, memoria, gemini, voz];
 
 export const getConnector = (id: string) => CONNECTORS.find(c => c.id === id);
 
