@@ -297,10 +297,10 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     up.state.geminiFail = 503;
     const r = await runTurn(deps, { userId, conversationId: null, message: '¿Qué clientes tengo?' });
     assert.match(r.reply, /Laura Méndez/);
-    assert.ok(up.state.groqRequests.length >= 3, 'delegó y consultó AINova a través de Groq');
+    assert.ok(up.state.groqRequests.length >= 2, 'el especialista consultó AINova a través de Groq');
     const st = deps.llm!.status!();
     assert.equal(st.find(s => s.name === 'gemini')!.state, 'enfriamiento');
-    assert.ok(st.find(s => s.name === 'groq')!.answered >= 3);
+    assert.ok(st.find(s => s.name === 'groq')!.answered >= 2);
     const geminiCalls = up.state.geminiRequests.length;
     await runTurn(deps, { userId, conversationId: null, message: 'hola' });
     assert.equal(up.state.geminiRequests.length, geminiCalls, 'Gemini está en enfriamiento: no se pierde tiempo con él');
@@ -353,16 +353,26 @@ describe('rotación de punta a punta (servidores falsos)', needsDb, () => {
     assert.ok(r.timing!.lastError, 'el registro lleva el motivo');
   });
 
-  test('cada turno informa dónde se fue el tiempo (llamadas, motor, más lenta)', async () => {
+  test('cada turno informa dónde se fue el tiempo (llamadas, motor, más lenta) y por qué camino salió', async () => {
     const deps = makeDeps(db, env);
     const r = await runTurn(deps, { userId, conversationId: null, message: '¿Qué clientes tengo?' });
-    assert.ok(r.timing!.llmCalls >= 3, 'delegar + herramienta + respuesta final');
+    assert.equal(r.timing!.llmCalls, 2, 'consulta clara de solo lectura: herramienta + resultado, sin pasar por el principal');
+    assert.equal(r.timing!.via, 'rapida');
     assert.deepEqual(r.timing!.engines, ['gemini']);
     assert.ok(r.timing!.totalMs! >= r.timing!.slowestMs);
     const { cookie } = await loginCookie(deps);
     const live = await call(deps, 'POST', '/api/chat/stream', { cookie, body: { message: '¿Qué clientes tengo?' }, headers: { origin: 'http://nyvo.test' } });
     const fin = JSON.parse(live.body.trim().split('\n').pop()!);
-    assert.equal(fin.tipo, 'fin'); assert.ok(fin.timing.llmCalls >= 3);
+    assert.equal(fin.tipo, 'fin'); assert.equal(fin.timing.llmCalls, 2);
+  });
+
+  test('el camino completo: 3 llamadas (delegar, herramienta, resultado) con la respuesta directa del especialista, 4 si se pide que el principal la redacte', async () => {
+    const full = await runTurn(makeDeps(db, { ...env, FAST_ROUTE: 'off' }), { userId, conversationId: null, message: '¿Qué clientes tengo?' });
+    assert.match(full.reply, /Laura Méndez/);
+    assert.equal(full.timing!.llmCalls, 3); assert.equal(full.timing!.via, 'directa');
+    const old = await runTurn(makeDeps(db, { ...env, FAST_ROUTE: 'off', PASS_THROUGH: 'off' }), { userId, conversationId: null, message: '¿Qué clientes tengo?' });
+    assert.match(old.reply, /Laura Méndez/);
+    assert.equal(old.timing!.llmCalls, 4); assert.equal(old.timing!.via, 'completa');
   });
 
   test('GEMINI_THINKING_BUDGET solo se envía si se configura', async () => {
