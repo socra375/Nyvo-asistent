@@ -19,7 +19,7 @@ import { cancelJob, listJobs, retryJob } from '../jobs/queue.js';
 import { runTick } from '../jobs/tick.js';
 import * as memory from '../memory/memory.js';
 import { synthesize, voiceMissing, voiceProvider } from '../voice/tts.js';
-import { sttMissing, sttProvider, transcribeWithGroq } from '../voice/stt.js';
+import { sttMissing, sttProvider, transcribeAudio } from '../voice/stt.js';
 
 interface Ctx { req: Req; res: Res; deps: Deps; params: Record<string, string>; url: URL; user: User }
 type Handler = (c: Ctx) => Promise<void>;
@@ -288,7 +288,7 @@ priv('POST', '/api/voice/stt', async ({ req, res, deps, user }) => {
   if (!audio.length || audio.length > deps.cfg.limits.sttMaxBytes) throw new HttpError(413, 'El audio está vacío o es demasiado largo.');
   if (!(await allowAttempt(deps.db, `stt:${user.id}`, 30, 60))) throw new HttpError(429, 'Demasiadas peticiones de voz. Espera un minuto.');
   const type = mime.split(';')[0]!;
-  json(res, 200, { text: provider === 'groq' ? await transcribeWithGroq(deps.cfg, deps.fetch, audio, type) : await deps.llm!.transcribe(audio, type) });
+  json(res, 200, { text: await transcribeAudio(deps.cfg, deps.fetch, deps.llm, audio, type) });
 });
 
 // ───────────────────────── Despachador ─────────────────────────
