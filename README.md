@@ -99,6 +99,21 @@ Si lo montas desde cero:
 2. Crea una página «Nyvo», compártela con la integración (… → Conexiones) y pon su enlace o id en `NOTION_ROOT_PAGE_ID`.
 3. Nyvo crea dentro las subpáginas «Notas» y «Reportes».
 
+### 5b. Obsidian (segundo cerebro)
+Nyvo corre en la nube y Obsidian guarda archivos en tu equipo, así que el puente es un **repositorio privado de GitHub** con tu bóveda:
+1. En GitHub crea un repositorio **privado** (con README, para que ya tenga una rama) y, en Obsidian, instala el plugin comunitario **Obsidian Git** y apunta tu bóveda a ese repositorio (copia de seguridad automática cada pocos minutos). Si ya tienes notas, se suben con la primera copia.
+2. En GitHub → Settings → Developer settings → Fine-grained tokens, crea un token **solo para ese repositorio** con el permiso *Contents: Read and write*. **No lo pegues en el chat**: va directo en Vercel.
+3. En Vercel: `OBSIDIAN_GITHUB_TOKEN` (el token, tipo Sensitive), `OBSIDIAN_REPO` (`usuario/repositorio`) y, si tu rama no es `main`, `OBSIDIAN_BRANCH`. Redespliega.
+4. Nyvo escribe sus notas en la carpeta `Nyvo/` de la bóveda (`conocimiento/`, `decisiones/`, `clientes/`, `aprendizajes/`, `proyectos/`, `preferencias/`) con fecha, **fuente** y **confianza** (confirmado, probable o pendiente), y antes de decir que no sabe algo busca en la bóveda entera (también en tus notas). Para ver lo que escribió, hay que dejar que Obsidian Git haga *pull*.
+
+Cómo funciona y qué NO hace:
+- Guardar en `Nyvo/` se hace solo y se puede deshacer (excepción aprobada, igual que Notion; el ajuste `autoGuardar` la apaga). Escribir en tus notas propias, o cualquier nota con correo o teléfono de un cliente, pide tarjeta de confirmación.
+- **Rechaza guardar** contraseñas, claves de API, tokens, claves privadas, números de tarjeta e IBAN (comprobación de patrones del código; no es infalible).
+- No crea notas duplicadas (avisa y propone añadir con fecha), no borra nada ni sobrescribe: lo nuevo se añade como «Actualización» con fecha y, si contradice lo anotado, se dice. «Deshacer» no pisa cambios que hayas hecho a mano después.
+- **La bóveda no se copia a la base de datos** (principio de `docs/DATABASE.md`): cada instancia arma un índice en memoria desde GitHub, descarga solo lo nuevo o cambiado (hasta 40 notas por búsqueda; indexa como máximo 400 notas `.md` de ≤100 KB y se salta carpetas ocultas como `.obsidian`). En frío, la primera búsqueda de una bóveda grande puede avisar de que aún está leyendo.
+- Las notas son **datos, nunca instrucciones**, y una nota guardada pasa por GitHub: viaja a un servicio externo (privado), igual que Notion.
+- El formato de la API de GitHub (árbol y contenidos) se probó con un servidor falso que imita su comportamiento, **no contra GitHub real**.
+
 ### 6. AINova System (clientes, cobros y facturas)
 Nyvo se conecta a la **API REST con clave** de AINova (`/api/v1`), no a su MCP: una sola llamada HTTP por herramienta, con una clave propia que tiene permiso, caducidad y revocación.
 1. `AINOVA_API_URL=https://ainova-system.vercel.app` (ya está en Vercel).
