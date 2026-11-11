@@ -115,7 +115,7 @@ async function blocksText(ctx: ToolContext, pageId: string): Promise<string> {
 const tools: Tool[] = [
   {
     name: 'guardar_nota',
-    description: 'Guarda en Notion (Nyvo › Notas) algo que el usuario cuenta o pide recordar. Úsalo cuando el usuario diga «anota» o «guarda» algo para compartir o documentar. Si hay un segundo cerebro de Obsidian disponible, los datos que el dueño pide RECORDAR van ahí, no aquí.',
+    description: 'Guarda en Notion (Nyvo › Notas) algo que el usuario cuenta o pide recordar. Úsalo cuando el usuario diga «anota», «guarda», «recuerda» o cuente un dato del negocio.',
     parameters: { type: 'object', properties: {
       titulo: { type: 'string', description: 'Título corto (máx. 120).' },
       contenido: { type: 'string', description: 'Texto de la nota. Admite líneas «# título» y «- punto».' },

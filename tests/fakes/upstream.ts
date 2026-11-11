@@ -4,7 +4,6 @@
  * - /ainova-muro/...    → responde como el muro de «Vercel Authentication» (401 con HTML, sin JSON)
  * - /ainova-redir/...   → responde con una redirección a /leak (la clave no debe seguirla)
  * - /notion/v1/...      → API de Notion (páginas y bloques en memoria)
- * - /github/repos/:o/:r/... → API de GitHub (árbol y contenidos) como bóveda de Obsidian, en memoria; sha de blob real de git
  * - /google/...         → OAuth de Google (auth + token) y Drive v3 (files.list)
  * - /gemini/v1beta/models/:m:generateContent → Gemini (agente guionizado, TTS y transcripción)
  * - /eleven/v1/text-to-speech/:voice → ElevenLabs
@@ -14,7 +13,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 /** Claves con el formato real de AINova: `ain_` + 43 caracteres. */
 export const FAKE_AINOVA_KEY = `ain_${'A'.repeat(43)}`;        // lectura y escritura
@@ -29,10 +28,6 @@ export interface FakeState {
   replies: { leadId: string; body: string }[];
   notion: Map<string, { id: string; parent: string; title: string; archived: boolean; blocks: unknown[] }>;
   notionRoot: string;
-  /** Bóveda de Obsidian (repositorio de GitHub): ruta → texto. `vaultCalls` anota cada petición («GET tree», «GET contents», «PUT <ruta>», «DELETE <ruta>»). */
-  vault: Map<string, string>;
-  vaultCalls: string[];
-  vaultEmptyRepo: boolean;
   driveFiles: { id: string; name: string; mimeType: string; modifiedTime: string; webViewLink: string; starred: boolean }[];
   googleEmail: string;
   geminiRequests: { model: string; body: Record<string, unknown> }[];
@@ -59,9 +54,6 @@ export function initialState(googleEmail = 'ianovasystem3@gmail.com'): FakeState
     replies: [],
     notion: new Map([[root, { id: root, parent: '', title: 'Nyvo', archived: false, blocks: [] }]]),
     notionRoot: root,
-    vault: new Map(),
-    vaultCalls: [],
-    vaultEmptyRepo: false,
     driveFiles: [
       { id: 'f1', name: 'Plan comercial 2026', mimeType: 'application/vnd.google-apps.document', modifiedTime: '2026-11-01T10:00:00Z', webViewLink: 'https://docs.google.com/document/d/f1', starred: true },
       { id: 'f2', name: 'Cobros noviembre', mimeType: 'application/vnd.google-apps.spreadsheet', modifiedTime: '2026-11-05T09:00:00Z', webViewLink: 'https://docs.google.com/spreadsheets/d/f2', starred: false }
@@ -181,47 +173,6 @@ async function handleAinova(s: FakeState, req: IncomingMessage, res: ServerRespo
     if (e instanceof FakeUserError) return send(res, 400, { ok: false, error: e.message });
     throw e;
   }
-}
-
-// ───────── GitHub (bóveda de Obsidian) ─────────
-const gitSha = (text: string) => createHash('sha1').update(`blob ${Buffer.byteLength(text)}\0`).update(text).digest('hex');
-async function handleGithub(s: FakeState, req: IncomingMessage, res: ServerResponse, path: string) {
-  if (!String(req.headers.authorization ?? '').startsWith('Bearer ') || req.headers['x-github-api-version'] !== '2022-11-28' || !req.headers['user-agent']) return send(res, 401, { message: 'Bad credentials' });
-  const m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)$/.exec(path);
-  if (!m || `${m[1]}/${m[2]}` !== 'dueno/boveda') return send(res, 404, { message: 'Not Found' });
-  const rest = m[3]!;
-  const raw = await body(req);
-  const data = raw ? JSON.parse(raw) as { message?: string; content?: string; sha?: string; branch?: string } : {};
-  if (/^\/git\/trees\/[^/]+$/.test(rest) && req.method === 'GET') {
-    s.vaultCalls.push('GET tree');
-    if (s.vaultEmptyRepo) return send(res, 409, { message: 'Git Repository is empty.' });
-    return send(res, 200, { tree: [...s.vault].map(([p, t]) => ({ path: p, type: 'blob', sha: gitSha(t), size: Buffer.byteLength(t) })), truncated: false });
-  }
-  const c = /^\/contents\/(.+?)(?:\?.*)?$/.exec(rest);
-  if (!c) return send(res, 404, { message: 'Not Found' });
-  const file = c[1]!.split('/').map(decodeURIComponent).join('/');
-  const current = s.vault.get(file);
-  if (req.method === 'GET') {
-    s.vaultCalls.push('GET contents');
-    return current === undefined ? send(res, 404, { message: 'Not Found' }) : send(res, 200, { path: file, sha: gitSha(current), content: Buffer.from(current).toString('base64'), encoding: 'base64' });
-  }
-  if (req.method === 'PUT') {
-    s.vaultCalls.push(`PUT ${file}`);
-    if (!data.message || !data.content || !data.branch) return send(res, 422, { message: 'Invalid request.' });
-    if (current !== undefined && data.sha !== gitSha(current)) return send(res, 409, { message: `${file} does not match ${data.sha}` });   // como GitHub: sin el sha actual no se pisa
-    if (current === undefined && data.sha) return send(res, 422, { message: 'sha was supplied but the file does not exist' });
-    const text = Buffer.from(data.content, 'base64').toString('utf8');
-    s.vault.set(file, text);
-    return send(res, current === undefined ? 201 : 200, { content: { path: file, sha: gitSha(text) }, commit: { sha: randomUUID().replace(/-/g, '') + '00000000', message: data.message } });
-  }
-  if (req.method === 'DELETE') {
-    s.vaultCalls.push(`DELETE ${file}`);
-    if (current === undefined) return send(res, 404, { message: 'Not Found' });
-    if (data.sha !== gitSha(current)) return send(res, 409, { message: `${file} does not match ${data.sha}` });
-    s.vault.delete(file);
-    return send(res, 200, { commit: { sha: randomUUID().replace(/-/g, '') + '00000000' } });
-  }
-  return send(res, 405, { message: 'Method Not Allowed' });
 }
 
 // ───────── Notion ─────────
@@ -397,7 +348,6 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
       }
       if (url.pathname === '/leak') { state.leakHits++; return send(res, 200, {}); }
       if (url.pathname.startsWith('/ainova/')) return await handleAinova(state, req, res, url);
-      if (url.pathname.startsWith('/github/')) return await handleGithub(state, req, res, url.pathname.slice('/github'.length) + (url.search ?? ''));
       if (url.pathname.startsWith('/notion/')) return await handleNotion(state, req, res, url.pathname.slice('/notion'.length));
       if (url.pathname.startsWith('/google/')) return await handleGoogle(state, req, res, url);
       const g = /^\/gemini\/v1beta\/models\/([^/:]+):generateContent$/.exec(url.pathname);
@@ -455,7 +405,6 @@ export function upstreamEnv(url: string, state: FakeState): Record<string, strin
   return {
     AINOVA_API_URL: `${url}/ainova`, AINOVA_API_KEY: FAKE_AINOVA_KEY,
     NOTION_TOKEN: 'notion-falso', NOTION_ROOT_PAGE_ID: state.notionRoot, NOTION_API_URL: `${url}/notion`,
-    OBSIDIAN_GITHUB_TOKEN: 'github-falso', OBSIDIAN_REPO: 'dueno/boveda', OBSIDIAN_API_URL: `${url}/github`,
     GOOGLE_CLIENT_ID: FAKE_GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: 'secreto-falso',
     GOOGLE_AUTH_URL: `${url}/google/auth`, GOOGLE_TOKEN_URL: `${url}/google/token`, GOOGLE_DRIVE_API_URL: `${url}/google`,
     GEMINI_API_KEY: 'gemini-falso', GEMINI_MODEL: 'modelo-falso', GEMINI_TTS_MODEL: 'tts-falso', GEMINI_TTS_VOICE: 'VozFalsa', GEMINI_API_URL: `${url}/gemini`,
