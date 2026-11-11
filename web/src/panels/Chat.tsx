@@ -92,7 +92,7 @@ export function Chat({ setCore, onActivity, notify, refreshKey }: Props) {
       setCards(c => ({ ...c, ...Object.fromEntries(r.cards.map(x => [x.id, x])) }));
       onActivity();
       if (readAloud && voice && !voice.missingEnv.length) {
-        try { await speak(r.reply.slice(0, voice.maxChars), () => setCore('hablando')); }
+        try { await speak(r.reply.slice(0, voice.maxChars), () => setCore('hablando'), voice.provider); }
         catch (e) { notify(e instanceof Error ? e.message : String(e), true); }
       }
     } catch (e) {

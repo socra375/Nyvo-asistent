@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WakeWordGate } from './wakeword';
-import { browserVoiceSupported, speakInBrowser } from './browserVoice';
+import { browserVoiceSupported, speakWithBrowser } from './browserVoice';
 
 const MAX_RECORD_MS = 15_000;
 
@@ -67,8 +67,9 @@ export function useRecorder(onError: (m: string) => void) {
   return { recording, start, stop, onError };
 }
 
-/** Lee un texto con la voz de Nyvo (síntesis en el servidor; si el servidor no puede hablar, con la voz del navegador). */
-export async function speak(text: string, onStart?: () => void): Promise<void> {
+/** Lee un texto con la voz de Nyvo: la del navegador (provider «navegador») o la síntesis en el servidor; si el servidor no puede hablar, con la voz del navegador. */
+export async function speak(text: string, onStart?: () => void, provider?: string): Promise<void> {
+  if (provider === 'navegador') return speakWithBrowser(text, onStart);
   let res: Response | null = null;
   let failure = 'No se pudo generar la voz.';
   try {
@@ -83,7 +84,7 @@ export async function speak(text: string, onStart?: () => void): Promise<void> {
   } catch (e) { failure = e instanceof Error ? e.message : failure; }
   if (!res) {
     if (!browserVoiceSupported()) throw new Error(failure);
-    return speakInBrowser(text, onStart);
+    return speakWithBrowser(text, onStart);
   }
   const url = URL.createObjectURL(await res.blob());
   const audio = new Audio(url);
