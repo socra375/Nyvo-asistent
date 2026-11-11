@@ -6,7 +6,7 @@ import { LlmHttpError, type FunctionDecl, type Llm, type LlmRequest, type LlmRes
  * a mensajes, de modo que se puede cambiar de motor a mitad de una conversación.
  * El formato sale de lo que se conoce de esa API; NO se ha verificado contra los servicios reales.
  */
-export interface CompatOpts { name: string; apiKey: string; model: string; baseUrl: string; fetch: typeof fetch; headers?: Record<string, string>; /** Esfuerzo de razonamiento («low» gasta menos cuota; solo modelos que lo admiten). */ reasoningEffort?: 'low' | 'medium' | 'high'; /** Tope aproximado de tokens de entrada por petición: se recortan los mensajes más antiguos. */ maxInputTokens?: number }
+export interface CompatOpts { name: string; apiKey: string; model: string; baseUrl: string; fetch: typeof fetch; headers?: Record<string, string>; /** Esfuerzo de razonamiento («low» gasta menos cuota; solo modelos que lo admiten). */ reasoningEffort?: 'low' | 'medium' | 'high'; /** Tope aproximado de tokens de entrada por petición: se recortan los mensajes más antiguos. */ maxInputTokens?: number; /** Si el proveedor retira el modelo, se pide su lista y se pasa al primero de estas preferencias que siga disponible (texto exacto o patrón). */ modelPreferences?: (string | RegExp)[] }
 
 type Msg =
   | { role: 'system' | 'user'; content: string }
@@ -40,6 +40,12 @@ export function toOpenAiMessages(system: string, turns: Turn[]): Msg[] {
   }
   return out;
 }
+
+/** Modelos que no sirven para chatear (transcripción, voz, moderación, embeddings…): nunca se eligen como reemplazo. */
+const NON_CHAT_MODELS = /whisper|tts|guard|embed|playai|orpheus|compound|distil/i;
+/** ¿La respuesta dice que el modelo ya no existe (lo retiran cada pocos meses)? */
+export const isMissingModel = (status: number, detail: string) =>
+  (status === 404 || status === 400) && /model_not_found|model_decommissioned|does not exist|decommissioned|no longer supported/i.test(detail);
 
 /** Esquema sin las claves que no todos los proveedores aceptan (format, nullable). */
 function cleanSchema(s: Schema | undefined): Record<string, unknown> {
@@ -101,10 +107,28 @@ export function trimTurns(system: string, turns: Turn[], maxTokens: number): Tur
 }
 
 export function createOpenAiCompat(o: CompatOpts): Llm {
+  let model = o.model;   // cambia solo si el proveedor retira el modelo y se encuentra otro (se recuerda mientras viva la instancia)
+
+  /** Pide la lista de modelos del proveedor y elige el primero preferido que siga disponible y sirva para chatear. */
+  async function findReplacement(signal?: AbortSignal): Promise<string | null> {
+    if (!o.modelPreferences?.length) return null;
+    try {
+      const r = await o.fetch(`${o.baseUrl}/models`, { headers: { Authorization: `Bearer ${o.apiKey}`, ...o.headers }, signal });
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null) as { data?: { id?: unknown }[] } | null;
+      const ids = (j?.data ?? []).map(m => m.id).filter((id): id is string => typeof id === 'string' && !NON_CHAT_MODELS.test(id) && id !== model);
+      for (const pref of o.modelPreferences) {
+        const hit = ids.find(id => (typeof pref === 'string' ? id === pref : pref.test(id)));
+        if (hit) return hit;
+      }
+    } catch { /* sin lista no hay reemplazo: se informa el error original */ }
+    return null;
+  }
+
   return {
     async generate(req: LlmRequest): Promise<LlmResponse> {
       const turns = o.maxInputTokens ? trimTurns(req.system, req.turns, o.maxInputTokens) : req.turns;
-      const body: Record<string, unknown> = { model: o.model, messages: toOpenAiMessages(req.system, turns), temperature: 0.4 };
+      const body: Record<string, unknown> = { model, messages: toOpenAiMessages(req.system, turns), temperature: 0.4 };
       if (req.tools?.length) { body.tools = toOpenAiTools(req.tools); body.tool_choice = 'auto'; }
       const post = () => o.fetch(`${o.baseUrl}/chat/completions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${o.apiKey}`, ...o.headers }, body: JSON.stringify(body), signal: req.signal
@@ -116,6 +140,15 @@ export function createOpenAiCompat(o: CompatOpts): Llm {
         delete body.reasoning_effort;
         r = await post();
         detail = r.ok ? '' : await r.text().catch(() => '');
+      }
+      if (!r.ok && isMissingModel(r.status, detail)) {
+        const found = await findReplacement(req.signal);
+        if (found) {
+          console.warn(`${o.name} ya no ofrece «${model}»: paso a «${found}» (fija ${o.name.toUpperCase()}_MODEL para no depender de esto)`);
+          model = found; body.model = found;
+          r = await post();
+          detail = r.ok ? '' : await r.text().catch(() => '');
+        }
       }
       if (!r.ok) throw new LlmHttpError(`${o.name} respondió ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, r.status);
       const j = await r.json().catch(() => null) as { choices?: { message?: { content?: string | null; tool_calls?: { function?: { name?: string; arguments?: string } }[] } }[] } | null;

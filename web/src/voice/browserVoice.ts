@@ -1,4 +1,4 @@
-import { SpeechQueue } from './speechQueue';
+import { SpeechQueue, type Playing } from './speechQueue';
 import { pickSpanishVoice } from './voicePick';
 
 export const browserVoiceSupported = () => typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
@@ -19,23 +19,23 @@ function loadVoices(maxMs = 1500): Promise<SpeechSynthesisVoice[]> {
 const START_TIMEOUT_MS = 4000;
 
 /**
- * Voz de Nyvo con la síntesis del propio navegador: sin claves, sin servidor y sin límite de peticiones. Misma interfaz que el
- * altavoz del servidor (cola con corte inmediato). No hay audio que medir, así que el nivel para animar el orbe se simula con los
- * pulsos de cada palabra que avisa el navegador.
+ * Reproductor con la síntesis del propio navegador: elige sola la mejor voz en español y devuelve cada frase como una
+ * reproducción que se puede cortar al instante. No hay audio que medir, así que el nivel para animar el orbe se simula con los
+ * pulsos de cada palabra que avisa el navegador. Lo usan la voz del navegador y el respaldo cuando falla la del servidor.
  */
-export function createBrowserSpeaker() {
+export function createBrowserPlayer() {
   const synth = window.speechSynthesis;
   let voice: SpeechSynthesisVoice | null | undefined;   // undefined = aún sin elegir
   let pulse = 0;
   let last = 0;
 
-  const queue = new SpeechQueue<string>({
-    prefetch: 1,
-    async synth(text) {
+  return {
+    /** Prepara la frase (elige la voz la primera vez). */
+    async prepare(text: string): Promise<string> {
       if (voice === undefined) voice = pickSpanishVoice(await loadVoices(), navigator.language);
       return text;
     },
-    play(text) {
+    play(text: string): Playing {
       let finish: () => void = () => undefined;
       const done = new Promise<void>(r => { finish = r; });
       const u = new SpeechSynthesisUtterance(text);
@@ -50,17 +50,28 @@ export function createBrowserSpeaker() {
       u.onerror = () => { clearTimeout(guard); finish(); };
       synth.speak(u);
       return { done, stop: () => { clearTimeout(guard); u.onend = null; u.onerror = null; synth.cancel(); finish(); } };
-    }
-  });
-
-  return {
-    queue,
+    },
     /** Nivel simulado (0..1): sube con cada palabra y baja suave, con un leve latido de fondo mientras habla. */
-    level(): number {
+    level(speaking: boolean): number {
       const t = performance.now();
       const dt = Math.min(0.1, (t - last) / 1000); last = t;
       pulse = Math.max(0, pulse - dt * 4.5);
-      return queue.speaking ? Math.min(1, 0.22 + 0.5 * pulse + 0.08 * Math.sin(t / 130)) : 0;
+      return speaking ? Math.min(1, 0.22 + 0.5 * pulse + 0.08 * Math.sin(t / 130)) : 0;
     }
   };
+}
+
+/** Voz de Nyvo con la síntesis del propio navegador: sin claves, sin servidor y sin límite de peticiones. Misma interfaz que el altavoz del servidor (cola con corte inmediato). */
+export function createBrowserSpeaker() {
+  const player = createBrowserPlayer();
+  const queue = new SpeechQueue<string>({ prefetch: 1, synth: text => player.prepare(text), play: text => player.play(text) });
+  return { queue, level: () => player.level(queue.speaking) };
+}
+
+/** Lee un texto una sola vez con la voz del navegador (respaldo de la lectura suelta). Resuelve al terminar. */
+export async function speakInBrowser(text: string, onStart?: () => void): Promise<void> {
+  const player = createBrowserPlayer();
+  const prepared = await player.prepare(text);
+  onStart?.();
+  await player.play(prepared).done;
 }

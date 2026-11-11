@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WakeWordGate } from './wakeword';
+import { browserVoiceSupported, speakInBrowser } from './browserVoice';
 
 const MAX_RECORD_MS = 15_000;
 
@@ -66,14 +67,23 @@ export function useRecorder(onError: (m: string) => void) {
   return { recording, start, stop, onError };
 }
 
-/** Lee un texto con la voz de Nyvo (síntesis en el servidor). */
+/** Lee un texto con la voz de Nyvo (síntesis en el servidor; si el servidor no puede hablar, con la voz del navegador). */
 export async function speak(text: string, onStart?: () => void): Promise<void> {
-  const res = await fetch('/api/voice/tts', {
-    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
-  });
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(j.error ?? 'No se pudo generar la voz.');
+  let res: Response | null = null;
+  let failure = 'No se pudo generar la voz.';
+  try {
+    res = await fetch('/api/voice/tts', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      failure = j.error ?? failure;
+      res = null;
+    }
+  } catch (e) { failure = e instanceof Error ? e.message : failure; }
+  if (!res) {
+    if (!browserVoiceSupported()) throw new Error(failure);
+    return speakInBrowser(text, onStart);
   }
   const url = URL.createObjectURL(await res.blob());
   const audio = new Audio(url);

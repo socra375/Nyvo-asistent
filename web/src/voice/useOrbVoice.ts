@@ -77,7 +77,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const micRef = useRef<Mic | null>(null);
   const speakerRef = useRef<Speaker | null>(null);
   /** Altavoz según la voz configurada: la del navegador (VOICE_PROVIDER=navegador, o sin nada configurado) o la del servidor. */
-  const makeSpeaker = (ctx: AudioContext | null) => (voiceRef.current?.provider === 'navegador' ? createBrowserSpeaker() : createSpeaker(ctx!));
+  const makeSpeaker = (ctx: AudioContext | null) => (voiceRef.current?.provider === 'navegador' ? createBrowserSpeaker() : createSpeaker(ctx!, { onFallback: r => fallbackNotice.current(r) }));
   const vad = useRef(new Vad());
   const preroll = useRef<PreRoll | null>(null);
   const utter = useRef<Float32Array[]>([]);
@@ -91,6 +91,14 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const activity = useRef(onActivity);
   const notifyRef = useRef(notify);
   useEffect(() => { activity.current = onActivity; notifyRef.current = notify; }, [onActivity, notify]);
+  // La voz del servidor falló y se lee con la del navegador: queda en la consola y se avisa una sola vez por sesión.
+  const warnedFallback = useRef(false);
+  const fallbackNotice = useRef((reason: string) => {
+    console.warn('voz del servidor no disponible, uso la del navegador:', reason);
+    if (warnedFallback.current) return;
+    warnedFallback.current = true;
+    notifyRef.current('La voz de Nyvo no respondió: uso la del navegador por un momento.', false);
+  });
   useEffect(() => { voiceRef.current = voice; }, [voice]);
   useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
   useEffect(() => { void api<VoiceConfig>('/api/voice/config').then(setVoice).catch(() => undefined); }, []);
