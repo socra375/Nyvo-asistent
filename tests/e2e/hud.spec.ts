@@ -180,6 +180,37 @@ test('voz: pulsar para hablar (micrófono falso), transcribe y envía; lectura e
   expect(res.headers()['content-type']).toBe('audio/wav');
 });
 
+test('voz del navegador en el chat del Panel: lee con la síntesis del navegador, sin pedir audio al servidor ni mostrar el error 409', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __spoken: { text: string; voice: string }[]; __tts: number };
+    w.__spoken = []; w.__tts = 0;
+    Object.defineProperty(navigator, 'language', { value: 'es-MX', configurable: true });
+    const voices = [{ name: 'Alex', lang: 'en-US', localService: true, default: true }, { name: 'Paulina', lang: 'es-MX', localService: true }];
+    class U { text: string; lang = ''; voice: { name: string } | null = null; rate = 1; onstart: (() => void) | null = null; onend: (() => void) | null = null; onerror: (() => void) | null = null; constructor(t: string) { this.text = t; } }
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', { value: U, configurable: true });
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      getVoices: () => voices, addEventListener() { /* sin eventos */ }, removeEventListener() { /* sin eventos */ }, cancel() { /* nada que cortar */ },
+      speak(u: U) { w.__spoken.push({ text: u.text, voice: u.voice?.name ?? '' }); setTimeout(() => u.onstart?.(), 10); setTimeout(() => u.onend?.(), 60); }
+    } });
+    const origFetch = window.fetch;
+    window.fetch = (...a: Parameters<typeof fetch>) => { if (String(a[0]).endsWith('/api/voice/tts')) w.__tts++; return origFetch(...a); };
+  });
+  await page.route('**/api/voice/config', async route => {
+    const r = await route.fetch();
+    await route.fulfill({ response: r, json: { ...(await r.json() as Record<string, unknown>), provider: 'navegador', missingEnv: [] } });
+  });
+  await login(page);
+  await page.getByText('Leer respuestas en voz alta').click();
+  await sendChat(page, '¿Qué clientes tengo?');
+  await expect(lastAssistant(page)).toContainText('Laura Méndez');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: unknown[] }).__spoken.length)).toBeGreaterThan(0);
+  const w = await page.evaluate(() => { const x = window as unknown as { __spoken: { text: string; voice: string }[]; __tts: number }; return { __spoken: x.__spoken, __tts: x.__tts }; });
+  expect(w.__spoken[0]!.voice).toBe('Paulina');
+  expect(w.__spoken.map(x => x.text).join(' ')).toContain('Laura Méndez');
+  expect(w.__tts).toBe(0);
+  await expect(page.getByText(/se genera en tu equipo/)).toHaveCount(0);   // el error que veía el dueño
+});
+
 test('palabra clave: ignora «oye nuevo» y responde a «Oye Nyvo» tras 2 s de confirmación', async ({ page }) => {
   await page.addInitScript(() => {
     class FakeSR {

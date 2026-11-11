@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WakeWordGate } from './wakeword';
+import { speakWithBrowser } from './browserVoice';
 
 const MAX_RECORD_MS = 15_000;
 
@@ -66,8 +67,9 @@ export function useRecorder(onError: (m: string) => void) {
   return { recording, start, stop, onError };
 }
 
-/** Lee un texto con la voz de Nyvo (síntesis en el servidor). */
-export async function speak(text: string, onStart?: () => void): Promise<void> {
+/** Lee un texto con la voz de Nyvo: la del navegador (provider «navegador») o la síntesis en el servidor. */
+export async function speak(text: string, onStart?: () => void, provider?: string): Promise<void> {
+  if (provider === 'navegador') return speakWithBrowser(text, onStart);
   const res = await fetch('/api/voice/tts', {
     method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
   });

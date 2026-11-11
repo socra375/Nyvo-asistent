@@ -1,5 +1,6 @@
 import { SpeechQueue } from './speechQueue';
 import { pickSpanishVoice } from './voicePick';
+import { chunkForSpeech } from './chunker';
 
 export const browserVoiceSupported = () => typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
@@ -63,4 +64,32 @@ export function createBrowserSpeaker() {
       return queue.speaking ? Math.min(1, 0.22 + 0.5 * pulse + 0.08 * Math.sin(t / 130)) : 0;
     }
   };
+}
+
+/**
+ * Lee un texto entero con la voz del navegador (la usa el chat del Panel, que no tiene cola de lectura): lo parte en frases
+ * cortas, porque Chrome corta las lecturas largas a mitad. Resuelve al terminar; si el navegador no tiene voz, lanza un error
+ * claro en vez de quedarse mudo.
+ */
+export async function speakWithBrowser(text: string, onStart?: () => void): Promise<void> {
+  if (!browserVoiceSupported()) throw new Error('Tu navegador no tiene voz integrada para leer en voz alta.');
+  const synth = window.speechSynthesis;
+  const voice = pickSpanishVoice(await loadVoices(), navigator.language);
+  synth.cancel();
+  let started = false;
+  for (const chunk of chunkForSpeech(text)) {
+    const ok = await new Promise<boolean>(resolve => {
+      const u = new SpeechSynthesisUtterance(chunk);
+      u.lang = voice?.lang ?? 'es-MX';
+      if (voice) u.voice = voice;
+      u.rate = 1.02;
+      let began = false;
+      const guard = setTimeout(() => { if (!began) { synth.cancel(); resolve(false); } }, START_TIMEOUT_MS);
+      u.onstart = () => { began = true; clearTimeout(guard); if (!started) { started = true; onStart?.(); } };
+      u.onend = () => { clearTimeout(guard); resolve(true); };
+      u.onerror = () => { clearTimeout(guard); resolve(began); };
+      synth.speak(u);
+    });
+    if (!ok && !started) throw new Error('El navegador no pudo leer la respuesta en voz alta (¿no tiene una voz en español instalada?).');
+  }
 }
