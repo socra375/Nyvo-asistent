@@ -130,6 +130,38 @@ test('orbe: con la voz del navegador se lee con una voz en español elegida sola
   expect(await page.evaluate(() => (window as unknown as { __tts: number }).__tts)).toBe(0);   // no se pidió audio al servidor
 });
 
+test('orbe: si el servidor no puede hablar (cuota agotada), la respuesta se lee con la voz del navegador y se avisa una vez', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __spoken: { text: string; voice: string }[]; __tts: number };
+    w.__spoken = []; w.__tts = 0;
+    Object.defineProperty(navigator, 'language', { value: 'es-MX', configurable: true });
+    const voices = [{ name: 'Paulina', lang: 'es-MX', localService: true }];
+    class U { text: string; lang = ''; voice: { name: string } | null = null; rate = 1; onstart: (() => void) | null = null; onend: (() => void) | null = null; onerror: (() => void) | null = null; onboundary: (() => void) | null = null; constructor(t: string) { this.text = t; } }
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', { value: U, configurable: true });
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      getVoices: () => voices, addEventListener() { /* sin eventos */ }, removeEventListener() { /* sin eventos */ }, cancel() { /* nada que cortar */ },
+      speak(u: U) { w.__spoken.push({ text: u.text, voice: u.voice?.name ?? '' }); setTimeout(() => { u.onstart?.(); u.onboundary?.(); }, 20); setTimeout(() => u.onend?.(), 500); }
+    } });
+  });
+  // La configuración sigue siendo la del servidor (Gemini), pero el servidor responde «cuota agotada» a toda petición de voz.
+  await page.route('**/api/voice/tts', async route => {
+    await page.evaluate(() => { (window as unknown as { __tts: number }).__tts++; });
+    await route.fulfill({ status: 429, json: { error: 'Gemini limitó la voz (cuota). Nyvo usará la voz del navegador por ahora.' } });
+  });
+  await loginOrb(page);
+  await page.getByRole('button', { name: 'Teclado' }).click();
+  await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 15_000 });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: unknown[] }).__spoken.length)).toBeGreaterThan(0);
+  const spoken = await page.evaluate(() => (window as unknown as { __spoken: { text: string; voice: string }[] }).__spoken);
+  expect(spoken[0]!.voice).toBe('Paulina');
+  expect(spoken.map(x => x.text).join(' ')).toContain('Laura Méndez');          // habló en vez de quedarse muda
+  await expect(page.getByText('La voz de Nyvo no respondió: uso la del navegador')).toBeVisible();   // y lo dijo
+  expect(await page.evaluate(() => (window as unknown as { __tts: number }).__tts)).toBeGreaterThan(0);   // primero lo intentó con el servidor
+  await expect(page.getByText(/Gemini limitó la voz/)).toHaveCount(0);           // el error crudo del proveedor no se le muestra
+});
+
 test('orbe: lo que se pide por teclado también se lee en voz alta (voz activada por defecto), sin nombrar las partes internas', async ({ page }) => {
   await loginOrb(page);
   await expect(page.getByRole('button', { name: 'Voz', exact: true })).toHaveAttribute('aria-pressed', 'true');

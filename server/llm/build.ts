@@ -30,14 +30,23 @@ export const engineConfigured = (env: Env, d: EngineDef) => Boolean(env[d.keyVar
 /** ¿Hay al menos un motor listo? */
 export const anyEngineConfigured = (env: Env) => engineOrder(env).some(d => engineConfigured(env, d));
 
+/** Si Groq retira el modelo configurado: este orden de preferencia entre los que siga ofreciendo (los mismos que usa Eddie). */
+const GROQ_PREFERENCES: (string | RegExp)[] = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', /^qwen\//, /^meta-llama\/llama-4/, /^moonshotai\//];
+
 const num = (v: string | undefined, d: number) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : d; };
+
+const explicitThinking = (env: Env): number | undefined => {
+  const v = env.GEMINI_THINKING_BUDGET;
+  return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined;
+};
 
 /** «Pensar» oculto de Gemini: también gasta cuota. Si GEMINI_THINKING_BUDGET no está puesto, se apaga en los modelos Flash (los demás, p. ej. Pro, no admiten apagarlo). */
 export function thinkingBudgetFor(env: Env, model: string): number | undefined {
-  const v = env.GEMINI_THINKING_BUDGET;
-  if (v !== undefined && v !== '' && Number.isFinite(Number(v))) return Number(v);
-  return /flash/i.test(model) ? 0 : undefined;
+  return explicitThinking(env) ?? (/flash/i.test(model) ? 0 : undefined);
 }
+
+/** Sin GEMINI_THINKING_BUDGET, los Flash bajan solos por la escalera de «pensar» (0 → «minimal» → «low» → sin ajuste) según lo que admita cada versión del modelo. */
+export const thinkingIsAuto = (env: Env, model: string): boolean => explicitThinking(env) === undefined && /flash/i.test(model);
 
 /** Arma el motor de IA (con rotación si hay varios configurados), o null si no hay ninguno. */
 export function buildLlm(cfg: Config, fetchImpl: typeof fetch): Llm | null {
@@ -50,8 +59,8 @@ export function buildLlm(cfg: Config, fetchImpl: typeof fetch): Llm | null {
     for (const model of models) {
       // Con varios modelos del mismo proveedor, cada uno es un motor aparte (cuota y enfriamiento propios): «groq:modelo».
       const name = models.length > 1 ? `${d.name}:${model}` : d.name;
-      if (d.name === 'gemini') engines.push({ name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl, thinkingBudget: thinkingBudgetFor(env, model) }) });
-      else if (d.name === 'groq') engines.push({ name, model, llm: createOpenAiCompat({ name: 'Groq', apiKey, model, baseUrl: `${cfg.urls.groq}/v1`, fetch: fetchImpl, reasoningEffort: /gpt-oss/i.test(model) ? 'low' : undefined, maxInputTokens: num(env.GROQ_MAX_INPUT_TOKENS, 7_500) || undefined }) });
+      if (d.name === 'gemini') engines.push({ name, model, transcribes: true, llm: createGemini({ apiKey, model, baseUrl: cfg.urls.gemini, fetch: fetchImpl, thinkingBudget: explicitThinking(env), thinkingAuto: thinkingIsAuto(env, model) }) });
+      else if (d.name === 'groq') engines.push({ name, model, llm: createOpenAiCompat({ name: 'Groq', apiKey, model, baseUrl: `${cfg.urls.groq}/v1`, fetch: fetchImpl, reasoningEffort: /gpt-oss/i.test(model) ? 'low' : undefined, maxInputTokens: num(env.GROQ_MAX_INPUT_TOKENS, 7_500) || undefined, modelPreferences: GROQ_PREFERENCES }) });
       else if (d.name === 'cerebras') engines.push({ name, model, llm: createOpenAiCompat({ name: 'Cerebras', apiKey, model, baseUrl: `${cfg.urls.cerebras}/v1`, fetch: fetchImpl }) });
       else engines.push({ name, model, llm: createOpenAiCompat({ name: 'OpenRouter', apiKey, model, baseUrl: `${cfg.urls.openrouter}/v1`, fetch: fetchImpl }) });
     }

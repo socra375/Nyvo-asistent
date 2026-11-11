@@ -1,5 +1,6 @@
 import type { Config } from '../config.js';
 import { HttpError } from '../http/http.js';
+import { LlmHttpError, type Llm } from '../llm/types.js';
 
 /** Quién transcribe lo que el dueño le dice a Nyvo. Groq (Whisper) si hay GROQ_API_KEY; si no, Gemini. */
 export type SttProvider = 'groq' | 'gemini';
@@ -50,4 +51,35 @@ const ARTIFACTS = /^(¡?subt[íi]tulos?\b.*|.*amara\.org.*|¡?suscr[íi]bete.*|�
 export function cleanTranscript(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   return ARTIFACTS.test(t) ? '' : t;
+}
+
+/** Plazo de cada transcripción: una colgada no deja la petición hasta que Vercel la corta (60 s). */
+const STT_TIMEOUT_MS = 20_000;
+
+/**
+ * Transcribe con el proveedor elegido y, si falla (cuota, caída, red, tiempo, o un audio que su decodificador no acepta), prueba
+ * el otro proveedor que esté configurado: los límites gratuitos de Whisper y de Gemini se acaban y no deben dejar a Nyvo sordo.
+ * Con STT_PROVIDER fijado no hay segundo intento: el dueño eligió ese.
+ */
+export async function transcribeAudio(cfg: Config, fetchImpl: typeof fetch, llm: Llm | null, audio: Buffer, mimeType: string): Promise<string> {
+  const env = cfg.env;
+  const first = sttProviderFrom(env);
+  const ready = { groq: Boolean(env.GROQ_API_KEY?.trim()), gemini: Boolean(llm && env.GEMINI_API_KEY?.trim()) };
+  const order: SttProvider[] = env.STT_PROVIDER?.trim() ? [first] : first === 'groq' ? ['groq', 'gemini'] : ['gemini', 'groq'];
+  const run = (p: SttProvider, signal: AbortSignal) => p === 'groq' ? transcribeWithGroq(cfg, fetchImpl, audio, mimeType, signal) : llm!.transcribe(audio, mimeType, signal);
+  let failure: unknown;
+  for (const [i, p] of order.entries()) {
+    // El primero se intenta aunque su disponibilidad no esté clara (la ruta ya comprobó lo que hacía falta); el de respaldo, solo si está listo.
+    if (i > 0 && !ready[p]) continue;
+    try { return await run(p, AbortSignal.timeout(STT_TIMEOUT_MS)); }
+    catch (e) {
+      failure = e;
+      if (order.slice(i + 1).some(q => ready[q])) console.warn(`transcripción: ${p} falló (${e instanceof Error ? e.message : e}); pruebo el otro proveedor`);
+    }
+  }
+  // Si fallaron todos, el último error dicho en claro (nunca el «motores de IA caídos» de un LlmHttpError ni el detalle crudo).
+  if (failure instanceof HttpError) throw failure;
+  if (failure instanceof LlmHttpError && failure.status === 429) throw new HttpError(429, 'Gemini limitó la transcripción. Espera un momento.');
+  if (failure instanceof LlmHttpError && failure.status) throw new HttpError(502, `Gemini no pudo transcribir (${failure.status}).`);
+  throw new HttpError(502, 'La transcripción no respondió a tiempo.');
 }
