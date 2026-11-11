@@ -6,6 +6,7 @@ import { createConfirmCard, createUndoCard, type Card } from '../actions/actions
 import { relevantNotes } from '../memory/memory.js';
 import { audit } from '../audit.js';
 import { hemisphereFor, type OnEvent } from './events.js';
+import { claimsDone, CLAIM_NUDGE, isEmptyPromise, PROMISE_NUDGE_SPECIALIST } from './promises.js';
 
 export type SpecialistId = 'negocios' | 'documentos' | 'navegador' | 'habilidades';
 
@@ -74,12 +75,21 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
     let calls = 0;
     let partial = false;
     let text = '';
+    let nudged = false;
     for (let step = 0; step < maxCalls + 2; step++) {
       if (Date.now() > deadline) { partial = true; break; }
       const limitReached = calls >= maxCalls;
       const resp = await deps.llm.generate({ system, turns, tools: limitReached ? undefined : decls, signal: ac.signal });
       turns.push({ role: 'model', parts: resp.parts.length ? resp.parts : [{ text: resp.text || '…' }] });
-      if (!resp.calls.length || limitReached) { text = resp.text; partial ||= limitReached && resp.calls.length > 0; break; }
+      if (!resp.calls.length || limitReached) {
+        // Promete («ahora mismo lo reviso») o da por hecho («ya lo creé») sin haber llamado a ninguna herramienta: se le avisa una vez.
+        if (!resp.calls.length && !limitReached && !nudged && calls === 0 && decls.length && (isEmptyPromise(resp.text) || claimsDone(resp.text))) {
+          nudged = true;
+          turns.push({ role: 'user', parts: [{ text: isEmptyPromise(resp.text) ? PROMISE_NUDGE_SPECIALIST : CLAIM_NUDGE }] });
+          continue;
+        }
+        text = resp.text; partial ||= limitReached && resp.calls.length > 0; break;
+      }
 
       const responses = [];
       for (const call of resp.calls) {
@@ -105,7 +115,9 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
     }
     await audit(deps.db, p.userId, 'especialista', { especialista: p.specialist, llamadas: calls, parcial: partial });
     if (partial && !text) text = 'No pude terminar la tarea dentro del plazo o del tope de llamadas. Esto es lo que alcancé a hacer.';
-    return { text: text || 'Listo.', cards, calls, partial, unavailable };
+    // Sin texto no se inventa un «Listo.»: se dice lo que de verdad pasó.
+    const nothing = calls > 0 ? 'Se hicieron las llamadas pero no pude redactar el resultado: revisa las tarjetas o vuelve a pedirlo.' : 'No obtuve respuesta del modelo, así que no se hizo nada.';
+    return { text: text || nothing, cards, calls, partial, unavailable };
   } catch (e) {
     if (ac.signal.aborted) return { text: 'Se agotó el plazo de la tarea; resultado parcial.', cards, calls: 0, partial: true, unavailable: [] };
     throw e;

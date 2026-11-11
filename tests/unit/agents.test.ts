@@ -152,7 +152,7 @@ describe('conectores, especialistas y tarjetas', needsDb, () => {
   });
 
   test('turno completo con Gemini (servidor falso): delega en Negocios y guarda la respuesta', async () => {
-    const deps = makeDeps(db, env);
+    const deps = makeDeps(db, { ...env, FAST_ROUTE: 'off' });   // el camino completo: el principal decide a quién delegar
     const r = await runTurn(deps, { userId, conversationId: null, message: '¿Qué clientes tengo?' });
     assert.match(r.reply, /Laura Méndez/);
     const msgs = (await db.query('select role, content from messages where conversation_id = $1 order by created_at', [r.conversationId])).rows;
