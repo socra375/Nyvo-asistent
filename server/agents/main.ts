@@ -1,6 +1,6 @@
 import type { Deps } from '../deps.js';
 import type { FunctionDecl, Turn } from '../llm/types.js';
-import { runSpecialist, SPECIALISTS, SECURITY_RULES, type SpecialistId } from './specialists.js';
+import { runSpecialist, SPECIALISTS, SECURITY_RULES, type SpecialistId, type SpecialistResult } from './specialists.js';
 import { addMessage, getOrCreateConversation, listMessages } from './conversations.js';
 import { getStyle } from '../memory/memory.js';
 import { enqueue } from '../jobs/queue.js';
@@ -10,11 +10,29 @@ import { composeMainPrompt } from './brain.js';
 import type { OnEvent } from './events.js';
 import { withTiming, type Timing } from '../llm/timing.js';
 import { cleanReply } from './persona.js';
+import { claimsDone, CLAIM_NUDGE, isEmptyPromise, PROMISE_NUDGE_MAIN } from './promises.js';
+import { fastRoute } from './fastRoute.js';
 
 const MAX_MAIN_STEPS = 4;
 /** Delegaciones a especialistas por petición (ahorra cuota y evita bucles). */
 const MAX_DELEGATIONS = 6;
 const HISTORY = 12;
+/** La respuesta se leerá en voz alta: se le pide al especialista (que no ve el modo del principal) que ya la dé corta. */
+const VOICE_TASK_HINT = '\n\n(La respuesta se leerá en voz alta: 2 o 3 frases cortas, sin listas, sin markdown y sin identificadores.)';
+/** En voz, un resultado más largo que esto lo condensa el principal en vez de leerse tal cual. */
+const MAX_VOICE_DIRECT_CHARS = 450;
+const isOff = (v: string | undefined) => v?.trim().toLowerCase() === 'off';
+
+/**
+ * El texto de un especialista, listo para decírselo al dueño tal cual (sin otra llamada al modelo para redactarlo), o null si
+ * conviene que el principal lo redacte: resultado parcial, vacío, o demasiado largo para leerlo en voz alta.
+ */
+export function directReply(r: SpecialistResult, voice: boolean): string | null {
+  const text = r.text.trim();
+  if (r.partial || !text || (voice && text.length > MAX_VOICE_DIRECT_CHARS)) return null;
+  const pending = r.cards.some(c => c.kind === 'confirm');
+  return pending && !/tarjeta/i.test(text) ? `${text} Confírmalo en la tarjeta.` : text;   // el dueño tiene que saber dónde confirmar
+}
 
 const DELEGATE: FunctionDecl = {
   name: 'delegar',
@@ -82,9 +100,27 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   let reply = '';
   let partial = false;
   let delegations = 0;
+  /** Por qué camino salió la respuesta: «rapida» (directo al especialista), «directa» (sin que el principal la redacte) o «completa». */
+  let via: 'rapida' | 'directa' | 'completa' = 'completa';
+  /** ¿Se ejecutó ya alguna delegación en este turno? Sin ella, una promesa o un «ya lo hice» son falsos. */
+  let toolWork = false;
+  let nudged = false;
+  const env = deps.cfg.env;
+  const voiceHint = p.voice ? VOICE_TASK_HINT : '';
 
   try {
-    for (let step = 0; step < MAX_MAIN_STEPS; step++) {
+    // Consulta clara de solo lectura: directo al especialista, sin gastar una llamada del principal en decidir a quién delegar.
+    const route = isOff(env.FAST_ROUTE) ? null : fastRoute(message);
+    if (route) {
+      const left = budgetMs - (Date.now() - start) - safety - 1000;
+      const r = await runSpecialist(d, { userId: p.userId, conversationId: conv.id, specialist: route.specialist, task: route.task + voiceHint, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
+      cards.push(...r.cards);
+      toolWork = true;
+      const direct = directReply(r, !!p.voice);
+      if (direct) { reply = direct; via = 'rapida'; delegations = 1; }   // si no salió bien, sigue el camino completo
+    }
+
+    for (let step = 0; step < MAX_MAIN_STEPS && via !== 'rapida'; step++) {
       const remaining = budgetMs - (Date.now() - start);
       if (remaining < Math.min(4000, budgetMs / 5)) { partial = true; break; }
       const last = step === MAX_MAIN_STEPS - 1;
@@ -96,13 +132,25 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
         throw e;
       }
       turns.push({ role: 'model', parts: resp.parts.length ? resp.parts : [{ text: resp.text || '…' }] });
-      if (!resp.calls.length) { reply = resp.text; break; }
+      if (!resp.calls.length) {
+        // Promete («ahora mismo lo reviso») o da por hecho («ya lo creé») sin haber delegado nada: el dueño se quedaría esperando
+        // algo que nadie va a hacer. Se le avisa al modelo una sola vez.
+        const promise = isEmptyPromise(resp.text);
+        if (!toolWork && !nudged && !last && (promise || claimsDone(resp.text))) {
+          nudged = true;
+          turns.push({ role: 'user', parts: [{ text: promise ? PROMISE_NUDGE_MAIN : CLAIM_NUDGE }] });
+          continue;
+        }
+        reply = resp.text; break;
+      }
+      toolWork = true;
 
-      const responses = [];
-      for (const call of resp.calls) {
+      // Las delegaciones de un mismo paso son independientes: van en paralelo (el orden de las respuestas se conserva).
+      const results = await Promise.all(resp.calls.map(async call => {
         const sp = String(call.args.especialista ?? '') as SpecialistId;
         const task = String(call.args.tarea ?? '').slice(0, 4000);
         let response: Record<string, unknown>;
+        let result: SpecialistResult | undefined;
         if (++delegations > MAX_DELEGATIONS) {
           response = { error: `Tope de ${MAX_DELEGATIONS} delegaciones por petición alcanzado: responde con lo que ya tienes.` };
         } else if (call.name !== 'delegar' || !(sp in SPECIALISTS) || !task) {
@@ -113,18 +161,24 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
           response = { estado: 'en_segundo_plano', trabajo: job.id, mensaje: 'La tarea quedó en «Trabajos»; el resultado llegará a esta conversación.' };
         } else {
           const left = budgetMs - (Date.now() - start) - safety - 1000;
-          const r = await runSpecialist(d, { userId: p.userId, conversationId: conv.id, specialist: sp, task, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
+          const r = await runSpecialist(d, { userId: p.userId, conversationId: conv.id, specialist: sp, task: task + voiceHint, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
           cards.push(...r.cards);
           partial ||= r.partial;
+          result = r;
           response = {
             resultado: r.text, parcial: r.partial,
             tarjetas: r.cards.map(c => ({ id: c.id, tipo: c.kind === 'confirm' ? 'pendiente_de_confirmacion' : 'hecho_con_opcion_de_deshacer', resumen: c.summary })),
             no_disponibles: r.unavailable.map(u => `${u.title}: ${u.state}`)
           };
         }
-        responses.push({ functionResponse: { name: call.name, response } });
-      }
-      turns.push({ role: 'user', parts: responses });
+        return { name: call.name, response, result };
+      }));
+      turns.push({ role: 'user', parts: results.map(x => ({ functionResponse: { name: x.name, response: x.response } })) });
+
+      // Una sola delegación que salió bien: su resultado ya es la respuesta; no se gasta otra llamada para volver a redactarlo.
+      const only = results.length === 1 ? results[0]!.result : undefined;
+      const direct = only && !isOff(env.PASS_THROUGH) && !last ? directReply(only, !!p.voice) : null;
+      if (direct) { reply = direct; via = 'directa'; break; }
     }
   } finally {
     clearTimeout(budgetTimer);
@@ -139,10 +193,15 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
     reply = `El motor de IA no respondió a tiempo (${why}). Suele ser sobrecarga o un modelo mal configurado: revisa los modelos (GEMINI_MODEL, GROQ_MODEL…) o añade la clave de otro motor (CEREBRAS_API_KEY, OPENROUTER_API_KEY). Inténtalo de nuevo en un momento.`;
   }
   reply = cleanReply(reply);
-  if (!reply) reply = partial ? 'No alcancé a terminar todo dentro del tiempo de esta petición. Lo que quedó pendiente puedes pedírmelo de nuevo o en segundo plano.' : 'Listo.';
+  // Sin respuesta no se inventa un «Listo.»: se dice lo que de verdad pasó.
+  if (!reply) {
+    reply = partial ? 'No alcancé a terminar todo dentro del tiempo de esta petición. Lo que quedó pendiente puedes pedírmelo de nuevo o en segundo plano.'
+      : cards.some(c => c.kind === 'confirm') ? 'Dejé preparadas las acciones en las tarjetas; confírmalas cuando quieras.'
+      : 'No obtuve una respuesta del modelo, así que no hice nada. Inténtalo de nuevo en un momento.';
+  }
   if (jobIds.length) deps.defer(import('../jobs/tick.js').then(m => m.runTick(deps)));
   await addMessage(deps.db, p.userId, conv.id, 'assistant', reply, cards.map(c => c.id));
-  const timing = { ...timed.stats(), totalMs: Date.now() - start };
+  const timing = { ...timed.stats(), totalMs: Date.now() - start, via };
   console.log('turno', JSON.stringify(timing));   // queda en los registros de Vercel: ahí se ve dónde se fue el tiempo
   return { conversationId: conv.id, reply, cardIds: cards.map(c => c.id), jobIds, partial, timing };
 }
