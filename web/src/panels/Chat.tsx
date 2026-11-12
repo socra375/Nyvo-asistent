@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api, fmtDate, type Card, type Conversation, type Message, type VoiceConfig } from '../lib/api';
 import { Panel } from '../hud/Panel';
-import type { CoreState } from '../hud/Core';
 import { speak, useRecorder, useWakeWord, wakeWordSupported } from '../voice/useVoice';
+
+/** Estado que la conversación le cuenta al resto de la pantalla (hoy solo lo usa para sí). */
+export type CoreState = 'reposo' | 'escuchando' | 'pensando' | 'hablando';
 
 const STATUS_TEXT: Record<Card['status'], string> = {
   pending: 'Pendiente de confirmación', running: 'Ejecutando…', done: 'Hecho', cancelled: 'Cancelada',

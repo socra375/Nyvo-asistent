@@ -7,7 +7,7 @@ export type Hemisphere = (typeof HEMISPHERES)[number];
 
 export type TurnEvent =
   | { tipo: 'pensando' }
-  | { tipo: 'hemisferio'; id: Hemisphere; estado: 'activo' | 'listo'; herramienta: string };
+  | { tipo: 'hemisferio'; id: Hemisphere; estado: 'activo' | 'listo'; herramienta: string; /** Cuánto tardó la herramienta (solo en «listo»). */ ms?: number };
 
 export type OnEvent = (e: TurnEvent) => void;
 

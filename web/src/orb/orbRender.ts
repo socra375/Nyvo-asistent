@@ -24,14 +24,33 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
 
   // Brillo del centro: frío (turquesa) al escuchar, cálido al hablar; el cambio es gradual
   const tone = mix(TEAL, WARM, d.mood);
+  const deep = mix([30, 110, 150], [160, 70, 100], d.mood);
   const pulse = 0.5 + 0.5 * Math.sin(d.clock * Math.PI * 2 * d.pulseHz);
-  const glowR = S * (0.46 + 0.035 * pulse * d.glow + d.level * 0.1);
+  const breath = 0.5 + 0.5 * Math.sin(d.clock * 0.9);   // respiración lenta, siempre viva
+  const glowR = S * (0.52 + 0.05 * pulse * d.glow + 0.02 * breath + d.level * 0.14);
   const glow = c.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-  glow.addColorStop(0, rgba(tone, 0.24 + d.glow * 0.1 + d.level * 0.06));
-  glow.addColorStop(0.55, rgba(mix([40, 120, 140], [150, 80, 90], d.mood), 0.12 + d.glow * 0.04));
-  glow.addColorStop(1, rgba(mix([40, 120, 140], [150, 80, 90], d.mood), 0));
+  glow.addColorStop(0, rgba(tone, 0.42 + d.glow * 0.16 + d.level * 0.12));
+  glow.addColorStop(0.35, rgba(mix(tone, deep, 0.5), 0.2 + d.glow * 0.06));
+  glow.addColorStop(0.7, rgba(deep, 0.08 + d.glow * 0.03));
+  glow.addColorStop(1, rgba(deep, 0));
   c.fillStyle = glow;
   c.fillRect(0, 0, w, h);
+
+  // Volumen: cuerpo esférico translúcido con luz desde arriba a la izquierda y borde brillante (efecto de profundidad)
+  const R = S * (0.78 + d.swell);
+  const body = c.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.05, cx, cy, R);
+  body.addColorStop(0, rgba([190, 235, 245], 0.07 + d.glow * 0.03));
+  body.addColorStop(0.6, rgba(deep, 0.035));
+  body.addColorStop(0.92, rgba(tone, 0.07 + d.level * 0.05));
+  body.addColorStop(1, rgba(tone, 0));
+  c.fillStyle = body;
+  c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.fill();
+  const rim = c.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.04);
+  rim.addColorStop(0, rgba(tone, 0));
+  rim.addColorStop(0.55, rgba(tone, 0.1 + 0.08 * d.glow + 0.08 * d.level));
+  rim.addColorStop(1, rgba(tone, 0));
+  c.fillStyle = rim;
+  c.beginPath(); c.arc(cx, cy, R * 1.04, 0, Math.PI * 2); c.fill();
 
   // Elipses tenues alrededor, como órbitas que giran despacio
   c.lineWidth = 1;
@@ -69,8 +88,15 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
     const t = p.dir === 1 ? p.t : 1 - p.t;
     const x = PX[a]! + (PX[b]! - PX[a]!) * t, y = PY[a]! + (PY[b]! - PY[a]!) * t;
     const fade = Math.sin(Math.PI * p.t);
-    c.fillStyle = rgba(SECTION_RGB[p.sec], 0.15 + 0.8 * fade);
-    c.beginPath(); c.arc(x, y, Math.max(1.4, 2.2 * U * 1.3), 0, Math.PI * 2); c.fill();
+    const col = SECTION_RGB[p.sec];
+    const tx = PX[a]! + (PX[b]! - PX[a]!) * (p.dir === 1 ? Math.max(0, p.t - 0.18) : 1 - Math.max(0, p.t - 0.18));
+    const ty = PY[a]! + (PY[b]! - PY[a]!) * (p.dir === 1 ? Math.max(0, p.t - 0.18) : 1 - Math.max(0, p.t - 0.18));
+    c.strokeStyle = rgba(col, 0.5 * fade); c.lineWidth = Math.max(1, 1.6 * U * 1.3);
+    c.beginPath(); c.moveTo(tx, ty); c.lineTo(x, y); c.stroke();
+    c.fillStyle = rgba(col, 0.18 * fade);
+    c.beginPath(); c.arc(x, y, Math.max(3, 5.5 * U * 1.3), 0, Math.PI * 2); c.fill();
+    c.fillStyle = rgba(mix(col, [255, 255, 255], 0.35), 0.2 + 0.8 * fade);
+    c.beginPath(); c.arc(x, y, Math.max(1.5, 2.3 * U * 1.3), 0, Math.PI * 2); c.fill();
   }
 
   // Nodos: primero los de atrás (más tenues), luego los de delante
@@ -81,12 +107,15 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
       if ((z >= 0) !== (pass === 1)) continue;
       const act = d.act[nd.sec];
       const depth01 = (z + 1) / 2;
-      const alpha = (0.5 + 0.5 * depth01) * Math.min(1, 0.85 + 0.6 * act);
+      const alpha = (0.5 + 0.5 * depth01) * Math.min(1, 0.9 + 0.6 * act);
       const size = nd.size * U * (0.62 + 0.55 * depth01) * (1 + 0.45 * act) * 1.15;
       const x = PX[i]!, y = PY[i]!;
       if (nd.label || nd.size > 4) {   // halo suave de los hubs
-        c.fillStyle = rgba(nd.rgb, (0.05 + 0.2 * act) * alpha);
-        c.beginPath(); c.arc(x, y, size * 1.9, 0, Math.PI * 2); c.fill();
+        const hl = 0.5 + 0.5 * Math.sin(d.clock * 1.6 + nd.seed);   // cada hub late a su ritmo
+        c.fillStyle = rgba(nd.rgb, (0.07 + 0.22 * act + 0.05 * hl) * alpha);
+        c.beginPath(); c.arc(x, y, size * (2.1 + 0.4 * act + 0.15 * hl), 0, Math.PI * 2); c.fill();
+        c.fillStyle = rgba(nd.rgb, (0.1 + 0.25 * act) * alpha);
+        c.beginPath(); c.arc(x, y, size * 1.25, 0, Math.PI * 2); c.fill();
       }
       c.fillStyle = rgba(nd.rgb, alpha);
       if (size < 1.5) c.fillRect(x - size / 2, y - size / 2, Math.max(1, size), Math.max(1, size));
@@ -129,8 +158,14 @@ export function drawOrb(c: CanvasRenderingContext2D, w: number, h: number, d: Dy
     c.beginPath(); c.arc(cx, cy, r * S, 0, Math.PI * 2); c.stroke();
   }
 
-  // Núcleo: anillo, arco que gira y punto central
+  // Núcleo: destello, anillo, arco que gira y punto central
   const cr = S * 0.045;
+  const flare = c.createRadialGradient(cx, cy, 0, cx, cy, cr * (3.4 + d.level * 2.5));
+  flare.addColorStop(0, rgba([255, 235, 245], 0.5 + d.level * 0.3));
+  flare.addColorStop(0.4, rgba(tone, 0.22 + d.level * 0.15));
+  flare.addColorStop(1, rgba(tone, 0));
+  c.fillStyle = flare;
+  c.beginPath(); c.arc(cx, cy, cr * (3.4 + d.level * 2.5), 0, Math.PI * 2); c.fill();
   c.strokeStyle = rgba([150, 240, 235], 0.85);
   c.lineWidth = Math.max(1, 1.3 * U * 1.3);
   c.beginPath(); c.arc(cx, cy, cr, 0, Math.PI * 2); c.stroke();

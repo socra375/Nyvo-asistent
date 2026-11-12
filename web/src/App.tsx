@@ -1,21 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, setUnauthorizedHandler, type Job, type SessionInfo } from './lib/api';
 import { Login } from './Login';
-import { Core, type CoreState } from './hud/Core';
-import { ClientsPanel, DrivePanel, JobsPanel, NotionPanel } from './panels/panels';
-import { Chat } from './panels/Chat';
-import { ConnectorsView } from './panels/Connectors';
-import { MemoryView } from './panels/Memory';
 import { OrbScreen } from './orb/OrbScreen';
-
-type View = 'orbe' | 'centro' | 'conectores' | 'memoria';
-const TAB_LABEL: Record<View, string> = { orbe: 'Orbe', centro: 'Centro de mando', conectores: 'Conectores', memoria: 'Memoria' };
-
-function Clock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
-  return <span className="clock">{now.toLocaleString('es', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>;
-}
 
 /** Lee ?error= y ?conectado= del retorno de Google y limpia la URL. */
 function takeUrlMessage(): { text: string; err: boolean } | null {
@@ -30,10 +16,8 @@ function takeUrlMessage(): { text: string; err: boolean } | null {
 export function App() {
   const [info, setInfo] = useState<SessionInfo | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  // Si llegamos de vuelta de Google (?conectado= / ?error=), se abre el panel para ver el resultado; si no, el orbe.
+  // Si llegamos de vuelta de Google (?conectado= / ?error=), se abre la tarjeta de Conectores para ver el resultado.
   const [urlMsg] = useState(() => takeUrlMessage());
-  const [view, setView] = useState<View>(urlMsg ? 'centro' : 'orbe');
-  const [core, setCore] = useState<CoreState>('reposo');
   const [refreshKey, setRefreshKey] = useState(0);
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [toast, setToast] = useState<{ text: string; err: boolean } | null>(urlMsg);
@@ -80,64 +64,18 @@ export function App() {
   if (!user) return <Login info={info} onLogin={u => setInfo({ ...info, user: u })} error={toast?.err ? toast.text : null} />;
 
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); setInfo({ ...info, user: null }); };
-  const goConnectors = () => setView('conectores');
 
-  // Pantalla principal: solo el orbe. El panel completo está a un toque («Panel»).
-  if (view === 'orbe') {
-    return (
-      <>
-        <OrbScreen onActivity={onActivity} notify={notify} openPanel={() => setView('centro')} logout={logout} jobsActive={active} />
-        {toast && (
-          <div className={`toast ${toast.err ? 'err' : ''}`} role={toast.err ? 'alert' : 'status'}>
-            <span>{toast.text}</span>
-            <button type="button" className="btn small ghost" onClick={() => setToast(null)} aria-label="Cerrar aviso">✕</button>
-          </div>
-        )}
-      </>
-    );
-  }
-
+  // Una sola pantalla: el orbe, con las tarjetas encima. Ya no hay un panel aparte.
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <img className="brand-logo" src="/logo-96.png" alt="" width={32} height={32} />
-          <strong>NYVO</strong><span>// AINOVA SYSTEM</span>
-        </div>
-        <nav className="tabs" role="tablist" aria-label="Secciones">
-          {(['orbe', 'centro', 'conectores', 'memoria'] as View[]).map(v => (
-            <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>
-              {TAB_LABEL[v]}
-            </button>
-          ))}
-        </nav>
-        <span className="spacer" />
-        <Clock />
-        <span className="who" title={user.email}>{user.email}</span>
-        <button type="button" className="btn small" onClick={logout}>Salir</button>
-      </header>
-
-      {view === 'centro' && (
-        <main className="grid">
-          <ClientsPanel refreshKey={refreshKey} goConnectors={goConnectors} />
-          <div className="area-center">
-            <section className="panel" aria-label="Estado de Nyvo"><Core state={core} jobsActive={active} /></section>
-            <Chat setCore={setCore} onActivity={onActivity} notify={notify} refreshKey={refreshKey} />
-          </div>
-          <DrivePanel refreshKey={refreshKey} goConnectors={goConnectors} />
-          <JobsPanel jobs={jobs} reload={loadJobs} onRunNow={runNow} />
-          <NotionPanel refreshKey={refreshKey} goConnectors={goConnectors} />
-        </main>
-      )}
-      {view === 'conectores' && <ConnectorsView notify={notify} />}
-      {view === 'memoria' && <MemoryView notify={notify} />}
-
+    <>
+      <OrbScreen onActivity={onActivity} notify={notify} logout={logout} refreshKey={refreshKey} jobs={jobs} jobsActive={active} loadJobs={loadJobs} runNow={runNow}
+        initialOpen={urlMsg ? 'conectores' : undefined} />
       {toast && (
         <div className={`toast ${toast.err ? 'err' : ''}`} role={toast.err ? 'alert' : 'status'}>
           <span>{toast.text}</span>
           <button type="button" className="btn small ghost" onClick={() => setToast(null)} aria-label="Cerrar aviso">✕</button>
         </div>
       )}
-    </div>
+    </>
   );
 }

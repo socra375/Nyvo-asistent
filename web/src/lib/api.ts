@@ -48,7 +48,8 @@ export interface Job {
 }
 export interface Note { id: string; content: string; tags: string[]; created_at: string }
 export interface Style { description: string; samples: string[]; updated_at: string | null }
-export interface VoiceConfig { provider: string; missingEnv: string[]; maxChars: number; stt: boolean; sttProvider?: string; sttMissing?: string[]; wakeWord: string }
+export interface ServerVoice { id: string; name: string; default?: boolean }
+export interface VoiceConfig { provider: string; voices?: ServerVoice[]; missingEnv: string[]; maxChars: number; stt: boolean; sttProvider?: string; sttMissing?: string[]; wakeWord: string }
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 export const money = (v: string | undefined) => (v === undefined ? '—' : `${Number(v).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`);
@@ -57,8 +58,8 @@ export type Hemisphere = 'rose' | 'johan' | 'mia' | 'nyvo';
 export const HEMISPHERES: readonly Hemisphere[] = ['rose', 'johan', 'mia', 'nyvo'];
 export type ChatEvent =
   | { tipo: 'pensando' }
-  | { tipo: 'hemisferio'; id: Hemisphere; estado: 'activo' | 'listo'; herramienta: string }
-  | { tipo: 'fin'; conversationId: string; reply: string; cards: Card[]; jobIds: string[]; partial: boolean }
+  | { tipo: 'hemisferio'; id: Hemisphere; estado: 'activo' | 'listo'; herramienta: string; /** Cuánto tardó (solo al terminar). */ ms?: number }
+  | { tipo: 'fin'; conversationId: string; reply: string; cards: Card[]; jobIds: string[]; partial: boolean; timing?: { totalMs?: number; via?: string } }
   | { tipo: 'error'; status: number; mensaje: string };
 
 /** Chat con progreso en vivo (NDJSON): llama a onEvent por cada línea y devuelve el evento final. */

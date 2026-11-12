@@ -7,7 +7,7 @@ const STATE: Record<ConnectorStatus['state'], string> = {
 };
 const ROLE: Record<string, string> = { negocios: 'Especialista Negocios', documentos: 'Especialista Documentos', nucleo: 'Núcleo', navegador: 'Navegador', habilidades: 'Habilidades' };
 
-export function ConnectorsView({ notify }: { notify: (m: string, err?: boolean) => void }) {
+export function ConnectorsView({ notify, onChanged }: { notify: (m: string, err?: boolean) => void; onChanged?: () => void }) {
   const [list, setList] = useState<ConnectorStatus[] | null>(null);
   useEffect(() => { void api<{ connectors: ConnectorStatus[] }>('/api/connectors').then(r => setList(r.connectors)).catch(e => notify(String(e.message ?? e), true)); }, [notify]);
 
@@ -15,6 +15,7 @@ export function ConnectorsView({ notify }: { notify: (m: string, err?: boolean) 
     try {
       setList((await api<{ connectors: ConnectorStatus[] }>(`/api/connectors/${id}`, { method: 'PUT', body })).connectors);
       notify('Ajuste guardado.');
+      onChanged?.();   // las tarjetas abiertas (Clientes, Archivos, Notion) vuelven a leer su estado
     } catch (e) { notify(e instanceof Error ? e.message : String(e), true); }
   };
 

@@ -7,11 +7,14 @@ import { stepConversation, type ConvAction, type ConvEvent, type ConvState } fro
 import { openMic, type Mic } from './capture';
 import { createSpeaker } from './speaker';
 import { browserVoiceSupported, createBrowserSpeaker } from './browserVoice';
+import { toCaption } from './speechText';
+import { effectiveEngine, loadPrefs, savePrefs, type VoicePrefs } from './voicePrefs';
 import type { SpeechQueue } from './speechQueue';
 
 /** Lo común de los dos altavoces (servidor y navegador). */
 interface Speaker { queue: Pick<SpeechQueue<unknown>, 'speak' | 'cancel' | 'speaking'>; level(): number }
 
+export interface LastTurn { ms: number; via?: string; agents: { id: Hemisphere; ms: number }[] }
 export type OrbState = 'reposo' | 'escuchando' | 'pensando' | 'hablando';
 export type SectionState = 'reposo' | 'activo' | 'listo';
 const STT_RATE = 16_000;
@@ -24,7 +27,7 @@ const WORKING: Record<Hemisphere, string> = { rose: 'Revisando tus mensajes…',
 /** Frase corta hablada si la espera se alarga: que no haya silencio muerto mientras busca el dato. */
 const FILLERS = ['Un momento, lo reviso.', 'Dame un segundo.', 'Ya lo miro.'];
 const FILLER_AFTER_MS = 900;
-const FILLER_WAIT_MS = 2500;
+const FILLER_WAIT_MS = 1500;
 const readVoicePref = (): boolean => { try { return window.localStorage.getItem(VOICE_KEY) !== 'off'; } catch { return true; } };
 
 export interface OrbVoice {
@@ -48,6 +51,13 @@ export interface OrbVoice {
   toggleVoice: () => void;
   /** Qué está haciendo mientras trabaja («Consultando tus clientes y cobros…»), o null. */
   working: string | null;
+  /** Cuánto tardó la última respuesta y cada sección que trabajó. */
+  lastTurn: LastTurn | null;
+  /** Configuración de voz del servidor (proveedor y voces disponibles). */
+  voiceConfig: VoiceConfig | null;
+  /** Voz elegida (se guarda en este navegador) y cómo cambiarla: la respuesta siguiente ya suena con la nueva. */
+  prefs: VoicePrefs;
+  setPrefs: (p: VoicePrefs) => void;
   toggle: () => void;
   sendText: (text: string) => void;
   stopSpeaking: () => void;
@@ -69,15 +79,25 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const [voiceOn, setVoiceOn] = useState(readVoicePref);
   const [textSpeaking, setTextSpeaking] = useState(false);
   const [working, setWorking] = useState<string | null>(null);
+  const [lastTurn, setLastTurn] = useState<LastTurn | null>(null);
+  const [prefs, setPrefsState] = useState<VoicePrefs>(loadPrefs);
 
   const convRef = useRef<ConvState>('inactivo');
   const voiceRef = useRef<VoiceConfig | null>(null);
+  const prefsRef = useRef<VoicePrefs>(prefs);
+  /** Suena la frase de espera: el eco de ese altavoz no debe tomarse por el dueño interrumpiendo. */
+  const fillerPlaying = useRef(false);
   const convId = useRef<string | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const micRef = useRef<Mic | null>(null);
   const speakerRef = useRef<Speaker | null>(null);
   /** Altavoz según la voz configurada: la del navegador (VOICE_PROVIDER=navegador, o sin nada configurado) o la del servidor. */
-  const makeSpeaker = (ctx: AudioContext | null) => (voiceRef.current?.provider === 'navegador' ? createBrowserSpeaker() : createSpeaker(ctx!, { onFallback: r => fallbackNotice.current(r) }));
+  const engineNow = useCallback(() => effectiveEngine(voiceRef.current?.provider, prefsRef.current), []);
+  const makeSpeaker = useCallback((ctx: AudioContext | null) => {
+    const pr = prefsRef.current;
+    const browser = { voiceURI: pr.browserURI, rate: pr.rate, volume: pr.volume };
+    return engineNow() === 'navegador' ? createBrowserSpeaker(browser) : createSpeaker(ctx!, { onFallback: r => fallbackNotice.current(r), voice: pr.serverVoice, volume: pr.volume, browser });
+  }, [engineNow]);
   const vad = useRef(new Vad());
   const preroll = useRef<PreRoll | null>(null);
   const utter = useRef<Float32Array[]>([]);
@@ -100,6 +120,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
     notifyRef.current('La voz de Nyvo no respondió: uso la del navegador por un momento.', false);
   });
   useEffect(() => { voiceRef.current = voice; }, [voice]);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
   useEffect(() => { void api<VoiceConfig>('/api/voice/config').then(setVoice).catch(() => undefined); }, []);
 
@@ -150,7 +171,10 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       filler.current.timer = undefined;
       const sp = speakerRef.current;
       if (!sp || mine !== turn.current) return;
-      filler.current.done = sp.queue.speak([FILLERS[fillerIdx.current++ % FILLERS.length]!], {});
+      filler.current.done = sp.queue.speak([FILLERS[fillerIdx.current++ % FILLERS.length]!], {
+        onStart: () => { fillerPlaying.current = true; },
+        onEnd: () => { fillerPlaying.current = false; }
+      });
     }, FILLER_AFTER_MS);
   }, []);
   /** Cancela la frase pendiente; si ya está sonando, espera (poco) a que termine para no cortarla a medias. */
@@ -159,6 +183,9 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
     const done = filler.current.done;
     filler.current = {};
     if (done) await Promise.race([done, new Promise<void>(r => setTimeout(r, FILLER_WAIT_MS))]);
+    // Si la frase de espera sigue sonando (o quedó colgada), se corta: la respuesta no puede esperar detrás de ella.
+    if (fillerPlaying.current || speakerRef.current?.queue.speaking) { speakerRef.current?.queue.cancel(); }
+    fillerPlaying.current = false;
   }, []);
 
   /** `live`: conversación por micrófono activa. `spoken`: la respuesta será corta y se leerá en voz alta (si hay voz). */
@@ -168,9 +195,12 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
     abort.current = ctrl;
     filler.current = {};
     setHeard(message); setError(null); setWorking(null);
+    const t0 = performance.now();
+    const agents = new Map<Hemisphere, number>();
     try {
       const fin = await streamChat({ message, conversationId: convId.current, voice: o.spoken }, e => {
         if (mine !== turn.current || e.tipo !== 'hemisferio') return;
+        if (e.estado === 'listo' && typeof e.ms === 'number') agents.set(e.id, (agents.get(e.id) ?? 0) + e.ms);
         mark(e.id, e.estado);
         if (e.estado === 'activo') { setWorking(WORKING[e.id]); if (o.spoken && speakerRef.current) startFiller(mine); }
       }, ctrl.signal);
@@ -179,11 +209,12 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       await endFiller();
       if (mine !== turn.current) return;
       convId.current = fin.conversationId;
-      setReply(fin.reply);
+      setReply(toCaption(fin.reply));
+      setLastTurn({ ms: Math.round(fin.timing?.totalMs ?? performance.now() - t0), via: fin.timing?.via, agents: [...agents].map(([id, ms]) => ({ id, ms })) });
       setCardsState(c => [...c.filter(x => !fin.cards.some(y => y.id === x.id)), ...fin.cards]);
       activity.current();
       const v = voiceRef.current;
-      const canSpeak = o.spoken && !!v && !v.missingEnv.length && !!speakerRef.current && (v.provider !== 'navegador' || browserVoiceSupported());
+      const canSpeak = o.spoken && !!v && !v.missingEnv.length && !!speakerRef.current && (engineNow() !== 'navegador' || browserVoiceSupported());
       // Las secciones que trabajaron quedan en «listo» y se apagan solas (READY_FADE_MS).
       const chunks = canSpeak ? chunkForSpeech(fin.reply.slice(0, v!.maxChars)) : [];
       if (o.live) {
@@ -212,7 +243,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       setError(msg); notifyRef.current(msg, true); setTextBusy(false); setWorking(null); clearSections();
       dispatch({ tipo: 'error' });
     }
-  }, [mark, clearSections, dispatch, startFiller, endFiller]);
+  }, [mark, clearSections, dispatch, startFiller, endFiller, engineNow]);
 
   const transcribe = useCallback(async (blocks: Float32Array[], rate: number) => {
     const mine = turn.current;
@@ -247,6 +278,9 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
     const speaking = speakerRef.current?.queue.speaking ?? false;
     level.current = speaking ? speakerRef.current!.level() : Math.min(1, e * 6);
     const ev = v.feed(e, dt, speaking);
+    // El altavoz de la frase de espera («un momento, lo reviso») se cuela en el micrófono: tomarlo por el dueño cancelaba la
+    // petición y la respuesta nunca llegaba. Mientras suena esa frase, una «interrupción» se descarta.
+    if (ev === 'start' && v.barged && fillerPlaying.current) { v.reset(); return; }
     if (ev === 'start') {
       dispatch({ tipo: 'voz-inicia', interrumpe: v.barged });   // 'empezar-frase' recoge el pre-roll
       utter.current.push(block);
@@ -284,7 +318,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       const msg = e instanceof Error && e.name === 'NotAllowedError' ? 'El navegador no permite usar el micrófono.' : e instanceof Error ? e.message : 'No se pudo abrir el micrófono.';
       setError(msg); notifyRef.current(msg, true);
     }
-  }, [onBlock, dispatch, closeMic]);
+  }, [onBlock, dispatch, closeMic, makeSpeaker]);
 
   const toggle = useCallback(() => {
     if (convRef.current === 'inactivo') void start();
@@ -295,13 +329,13 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const ensureSpeaker = useCallback(async () => {
     if (speakerRef.current) return;
     try {
-      if (voiceRef.current?.provider === 'navegador') { speakerRef.current = createBrowserSpeaker(); return; }   // la voz del navegador no necesita AudioContext
+      if (engineNow() === 'navegador') { speakerRef.current = makeSpeaker(null); return; }   // la voz del navegador no necesita AudioContext
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.resume();
       ctxRef.current = ctx;
       speakerRef.current = makeSpeaker(ctx);
     } catch { /* sin audio: se muestra solo el texto */ }
-  }, []);
+  }, [engineNow, makeSpeaker]);
 
   const sendText = useCallback((text: string) => {
     const t = text.trim();
@@ -315,6 +349,18 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
       await converse(t, { live, spoken: live || talk });
     })();
   }, [converse, dispatch, ensureSpeaker]);
+
+  /** Cambia la voz: se guarda y el altavoz se rehace con ella (lo que esté sonando se corta). */
+  const setPrefs = useCallback((p: VoicePrefs) => {
+    prefsRef.current = p;
+    savePrefs(p);
+    setPrefsState(p);
+    speakerRef.current?.queue.cancel();
+    setTextSpeaking(false);
+    if (ctxRef.current) speakerRef.current = makeSpeaker(ctxRef.current);
+    else if (engineNow() === 'navegador') speakerRef.current = makeSpeaker(null);
+    else speakerRef.current = null;   // se crea al primer envío (hace falta un gesto del usuario para el audio)
+  }, [makeSpeaker, engineNow]);
 
   const stopSpeaking = useCallback(() => {
     const was = convRef.current === 'hablando';
@@ -340,7 +386,7 @@ export function useOrbVoice(onActivity: () => void, notify: (m: string, err?: bo
   const getLevel = useCallback(() => (speakerRef.current?.queue.speaking ? speakerRef.current.level() : level.current), []);
 
   return useMemo(() => ({
-    state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working,
+    state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working, lastTurn, voiceConfig: voice, prefs, setPrefs,
     voiceReady: !!voice && !voice.missingEnv.length, sttReady: !!voice?.stt, live: conv !== 'inactivo', onActivity
-  }), [state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working, voice, conv, onActivity]);
+  }), [state, sections, heard, reply, cards, setCards, error, getLevel, toggle, sendText, stopSpeaking, voiceOn, toggleVoice, working, lastTurn, prefs, setPrefs, voice, conv, onActivity]);
 }

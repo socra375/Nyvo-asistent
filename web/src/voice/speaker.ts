@@ -1,6 +1,6 @@
 import { SpeechQueue, type Playing } from './speechQueue';
 import { rms } from './wav';
-import { browserVoiceSupported, createBrowserPlayer } from './browserVoice';
+import { browserVoiceSupported, createBrowserPlayer, type BrowserVoiceOpts } from './browserVoice';
 import { createFallback, isVoiceProviderFault } from './fallback';
 
 /** Una frase lista para sonar: audio del servidor, o texto para la voz del navegador cuando el servidor falló. */
@@ -13,17 +13,20 @@ const SERVER_COOLDOWN_MS = 60_000;
  * Voz de Nyvo: síntesis en el servidor (/api/voice/tts) y reproducción con Web Audio, que se puede cortar al instante.
  * Si el servidor no puede hablar (cuota agotada, caída, red), la frase se lee con la voz del navegador en vez de quedarse mudo.
  */
-export function createSpeaker(ctx: AudioContext, opts: { onFallback?: (reason: string) => void } = {}) {
+export function createSpeaker(ctx: AudioContext, opts: { onFallback?: (reason: string) => void; /** Voz del servidor elegida (id de su lista). */ voice?: string | null; volume?: number; /** Cómo suena el respaldo del navegador. */ browser?: BrowserVoiceOpts } = {}) {
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
-  analyser.connect(ctx.destination);
+  const gain = ctx.createGain();
+  gain.gain.value = opts.volume ?? 1;
+  analyser.connect(gain);
+  gain.connect(ctx.destination);
   const data = new Float32Array(analyser.fftSize);
-  const browser = browserVoiceSupported() ? createBrowserPlayer() : null;
+  const browser = browserVoiceSupported() ? createBrowserPlayer(opts.browser) : null;
 
   async function synthServer(text: string, signal: AbortSignal): Promise<Piece> {
     const res = await fetch('/api/voice/tts', {
       method: 'POST', credentials: 'same-origin', signal,
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...(opts.voice ? { voice: opts.voice } : {}) })
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({})) as { error?: string };

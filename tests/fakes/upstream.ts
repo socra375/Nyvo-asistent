@@ -33,6 +33,8 @@ export interface FakeState {
   geminiRequests: { model: string; body: Record<string, unknown> }[];
   /** Si se pone un código, Gemini responde con ese error (caída, cuota…). */
   geminiFail: number | null;
+  /** Demora (ms) de los especialistas: simula un agente lento. Se ajusta con GET /__fake/slow?ms=N. */
+  slowMs: number;
   /** Peticiones a «chat/completions» de Groq (formato OpenAI) y fallo forzado. */
   groqRequests: Record<string, unknown>[];
   groqFail: number | null;
@@ -60,7 +62,7 @@ export function initialState(googleEmail = 'ianovasystem3@gmail.com'): FakeState
     ],
     googleEmail,
     geminiRequests: [],
-    geminiFail: null, groqRequests: [], groqFail: null,
+    geminiFail: null, slowMs: 0, groqRequests: [], groqFail: null,
     apiCalls: [],
     ainova: { rateLimited: false, revoked: false },
     leakHits: 0
@@ -347,6 +349,7 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         return res.end();
       }
       if (url.pathname === '/leak') { state.leakHits++; return send(res, 200, {}); }
+      if (url.pathname === '/__fake/slow') { state.slowMs = Math.max(0, Math.min(15000, Number(url.searchParams.get('ms')) || 0)); return send(res, 200, { slowMs: state.slowMs }); }
       if (url.pathname.startsWith('/ainova/')) return await handleAinova(state, req, res, url);
       if (url.pathname.startsWith('/notion/')) return await handleNotion(state, req, res, url.pathname.slice('/notion'.length));
       if (url.pathname.startsWith('/google/')) return await handleGoogle(state, req, res, url);
@@ -356,6 +359,9 @@ export async function startUpstream(port = 0, state = initialState()): Promise<U
         const b = JSON.parse(await body(req)) as Record<string, unknown>;
         state.geminiRequests.push({ model: decodeURIComponent(g[1]!), body: b });
         if (state.geminiFail) return send(res, state.geminiFail, { error: { message: 'fallo simulado' } });
+        // Un especialista (tiene herramientas y no «delegar») tarda state.slowMs: el agente lento que hace esperar al usuario.
+        const decl = ((b.tools as { functionDeclarations: { name: string }[] }[] | undefined)?.[0]?.functionDeclarations ?? []).map(d => d.name);
+        if (state.slowMs && decl.length && !decl.includes('delegar')) await new Promise(r => setTimeout(r, state.slowMs));
         return send(res, 200, fakeGemini(b));
       }
       if (/^\/eleven\/v1\/text-to-speech\//.test(url.pathname)) {

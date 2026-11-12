@@ -3,6 +3,7 @@ import { missingEnv } from '../config.js';
 import { geminiGenerate } from '../llm/gemini.js';
 import { LlmHttpError } from '../llm/types.js';
 import { HttpError } from '../http/http.js';
+import { resolveVoice } from './voices.js';
 
 /** «navegador» = la voz del propio navegador (Web Speech): no necesita claves ni servidor. */
 export type VoiceProvider = 'gemini' | 'elevenlabs' | 'speechify' | 'navegador';
@@ -107,18 +108,20 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: string, style?: string): Promise<Speech> {
+/** `voice`: la voz elegida por el dueño; solo vale si está en la lista de voces del proveedor (ver voices.ts), si no se usa la predeterminada. */
+export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: string, style?: string, voice?: string): Promise<Speech> {
   if (voiceProvider(cfg) === 'navegador') throw new HttpError(409, 'La voz es la del navegador: se genera en tu equipo, no en el servidor.');
   const missing = voiceMissing(cfg);
   if (missing.length) throw new HttpError(503, `Falta configurar la voz: ${missing.join(', ')}.`);
   const text = prepareSpeech(rawText, cfg.limits.ttsMaxChars);
   const env = cfg.env;
+  const chosen = resolveVoice(voiceProvider(cfg), env, voice);
 
   if (voiceProvider(cfg) === 'elevenlabs') {
     const model = env.ELEVENLABS_MODEL_ID?.trim() || DEFAULT_ELEVEN_MODEL;
     // Flash/Turbo v2.5 admiten pista de idioma: evita que una frase corta en español se lea con acento inglés.
     const body: Record<string, unknown> = { text, model_id: model, voice_settings: ELEVEN_VOICE_SETTINGS, ...(/v2_5/.test(model) ? { language_code: 'es' } : {}) };
-    const send = (payload: Record<string, unknown>) => fetchImpl(`${cfg.urls.elevenlabs}/v1/text-to-speech/${encodeURIComponent(env.ELEVENLABS_VOICE_ID!)}?output_format=mp3_44100_128`, {
+    const send = (payload: Record<string, unknown>) => fetchImpl(`${cfg.urls.elevenlabs}/v1/text-to-speech/${encodeURIComponent(chosen ?? env.ELEVENLABS_VOICE_ID!)}?output_format=mp3_44100_128`, {
       method: 'POST', headers: { 'xi-api-key': env.ELEVENLABS_API_KEY!, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(TTS_TIMEOUT_MS)
     });
     try {
@@ -143,7 +146,7 @@ export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: 
     const r = await fetchImpl(`${cfg.urls.speechify}/v1/audio/speech`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.SPEECHIFY_API_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ input: text, voice_id: env.SPEECHIFY_VOICE_ID, audio_format: 'mp3', model: env.SPEECHIFY_MODEL || 'simba-multilingual' }),
+      body: JSON.stringify({ input: text, voice_id: chosen ?? env.SPEECHIFY_VOICE_ID, audio_format: 'mp3', model: env.SPEECHIFY_MODEL || 'simba-multilingual' }),
       signal: AbortSignal.timeout(TTS_TIMEOUT_MS)
     }).catch(() => { throw new HttpError(502, 'Speechify no respondió a tiempo.'); });
     if (!r.ok) {
@@ -164,7 +167,7 @@ export async function synthesize(cfg: Config, fetchImpl: typeof fetch, rawText: 
           contents: [{ role: 'user', parts: [{ text: `${style || env.GEMINI_TTS_STYLE || DEFAULT_STYLE}: ${text}` }] }],
           generationConfig: {
             responseModalities: ['AUDIO'],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: env.GEMINI_TTS_VOICE } } }
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: chosen ?? env.GEMINI_TTS_VOICE } } }
           }
         }, AbortSignal.timeout(TTS_TIMEOUT_MS));
       const part = (resp.candidates as { content?: { parts?: { inlineData?: { data: string; mimeType?: string } }[] } }[] | undefined)?.[0]?.content?.parts?.find(p => p.inlineData);

@@ -58,10 +58,10 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
   const timer = setTimeout(() => ac.abort(new Error('Plazo agotado')), deadlineMs);
 
   try {
-    const { tools, unavailable, guides } = await toolsForRole(deps, p.userId, spec.role, ac.signal);
+    // Las herramientas del conector y las notas del dueño no dependen una de otra: se piden a la vez.
+    const [{ tools, unavailable, guides }, notes] = await Promise.all([toolsForRole(deps, p.userId, spec.role, ac.signal), relevantNotes(deps.db, p.userId, p.task)]);
     const byName = new Map<string, BoundTool>(tools.map(t => [t.fullName, t]));
     const decls: FunctionDecl[] = tools.map(t => ({ name: t.fullName, description: t.tool.description.slice(0, 1000), parameters: t.tool.parameters }));
-    const notes = await relevantNotes(deps.db, p.userId, p.task);
     const system = [
       `Eres el especialista «${spec.title}» de Nyvo, el segundo director de AINova System. Tu ámbito: ${spec.description}`,
       'Resuelve SOLO la tarea recibida, con el mínimo de llamadas. Al terminar, responde con un resumen breve de lo hecho y los datos clave.',
@@ -91,8 +91,8 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
         text = resp.text; partial ||= limitReached && resp.calls.length > 0; break;
       }
 
-      const responses = [];
-      for (const call of resp.calls) {
+      // Una llamada: valida, avisa de qué sección trabaja, ejecuta y devuelve su respuesta (los errores no tumban el turno).
+      const handle = async (call: { name: string; args: Record<string, unknown> }) => {
         const bound = byName.get(call.name);
         let response: Record<string, unknown>;
         if (calls >= maxCalls) { partial = true; response = { error: 'Tope de llamadas alcanzado en esta petición.' }; }
@@ -102,14 +102,21 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
           try {
             const id = hemisphereFor(bound.connectorId, bound.tool.name);
             p.onEvent?.({ tipo: 'hemisferio', id, estado: 'activo', herramienta: bound.tool.name });
+            const t0 = Date.now();
             try { response = await execute(deps, p, bound, call.args, cards); }
-            finally { p.onEvent?.({ tipo: 'hemisferio', id, estado: 'listo', herramienta: bound.tool.name }); }
+            finally { p.onEvent?.({ tipo: 'hemisferio', id, estado: 'listo', herramienta: bound.tool.name, ms: Date.now() - t0 }); }
           } catch (e) {
             response = { error: e instanceof Error ? e.message : String(e) };
           }
         }
-        responses.push({ functionResponse: { name: call.name, response } });
-      }
+        return { functionResponse: { name: call.name, response } };
+      };
+      // Varias lecturas del mismo paso no dependen entre sí: van a la vez (la espera es la de la más lenta, no la suma). Las que
+      // cambian datos siguen una a una, para que las tarjetas salgan en orden.
+      const readsOnly = resp.calls.length > 1 && resp.calls.every(c => byName.get(c.name)?.tool.mutates === false);
+      const responses = [];
+      if (readsOnly) responses.push(...await Promise.all(resp.calls.map(handle)));
+      else for (const call of resp.calls) responses.push(await handle(call));
       turns.push({ role: 'user', parts: responses });
       if (calls >= maxCalls) partial = true;
     }
