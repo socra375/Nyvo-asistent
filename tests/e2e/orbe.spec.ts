@@ -90,11 +90,17 @@ test('orbe: teclado → piensa, se enciende la sección que trabaja y llegan sub
   await page.getByRole('button', { name: 'Subtítulos' }).click();
   await expect(page.getByTestId('captions')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Panel', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'Centro de mando' })).toBeVisible();
+  // Las tarjetas flotan sobre el orbe (no hay panel aparte): se abren con la barra y se cierran con ✕ o Escape.
+  const dock = page.getByRole('navigation', { name: 'Tarjetas' });
+  await dock.getByRole('button', { name: 'Conversación', exact: true }).click();
   await expect(page.getByTestId('panel-chat')).toBeVisible();
-  await page.getByRole('tab', { name: 'Orbe' }).click();
-  await expect(page.getByTestId('orbscreen')).toBeVisible();
+  await expect(page.getByTestId('orb')).toBeVisible();   // el orbe sigue detrás
+  await page.getByRole('button', { name: 'Cerrar Conversación' }).click();
+  await expect(page.getByTestId('panel-chat')).toHaveCount(0);
+  await dock.getByRole('button', { name: 'Voces', exact: true }).click();
+  await expect(page.getByTestId('win-voces')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('win-voces')).toHaveCount(0);
 });
 
 test('orbe: con la voz del navegador se lee con una voz en español elegida sola, sin pedir audio al servidor', async ({ page }) => {
@@ -172,7 +178,7 @@ test('orbe: lo que se pide por teclado también se lee en voz alta (voz activada
   await tts;                                                     // pidió la voz de la respuesta
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 15_000 });
   await expect(page.getByTestId('captions')).toContainText('Laura Méndez');
-  await expect(page.getByTestId('captions')).not.toContainText(/Johan|Rose|Mia\b/);   // sin nombrar las partes internas
+  await expect(page.locator('[data-testid="captions"] .said')).not.toContainText(/Johan|Rose|Mia\b/);   // sin nombrar las partes internas
   // «Callar» corta la voz y el orbe vuelve al reposo
   await page.getByRole('button', { name: 'Callar' }).click();
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
@@ -255,4 +261,56 @@ test('orbe en móvil: cabe sin desplazamiento y las cuatro secciones se ven @mov
   expect(box!.width).toBeLessThanOrEqual(vp.width);
   expect((await paintedPixels(page)).n).toBeGreaterThan(3000);
   await page.screenshot({ path: `${SHOTS}/orbe-movil.png` });
+});
+
+test('orbe: si el agente tarda, avisa con una frase corta y cuando llega la respuesta SÍ la dice en voz alta', async ({ page }) => {
+  const tts: string[] = [];
+  page.on('request', r => { if (r.url().endsWith('/api/voice/tts')) tts.push(String(r.postData() ?? '')); });
+  // El especialista tarda 3 s: es el caso en que Nyvo se callaba para siempre al llegar la respuesta.
+  await page.request.get('http://localhost:4110/__fake/slow?ms=3000');
+  try {
+    await loginOrb(page);
+    await page.getByRole('button', { name: 'Teclado' }).click();
+    await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
+    await page.getByRole('button', { name: 'Enviar' }).click();
+    await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'pensando');
+    // 1) Mientras espera dice una frase corta: no se queda mudo.
+    await expect.poll(() => tts.some(t => /Un momento|Dame un segundo|Ya lo miro/.test(t)), { timeout: 6000 }).toBe(true);
+    // 2) Cuando llega la respuesta, se lee: pide el audio con el contenido real y el orbe habla.
+    await expect.poll(() => tts.some(t => /Laura/.test(t)), { timeout: 15_000 }).toBe(true);
+    await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'hablando', { timeout: 10_000 });
+    await expect(page.locator('[data-testid="captions"] .said')).toContainText('Laura Méndez');
+    // 3) Muestra cuánto tardó la respuesta y cada parte que trabajó.
+    await expect(page.getByTestId('turn-timing')).toContainText(/Respondió en \d/);
+    await expect(page.getByTestId('turn-timing')).toContainText(/Johan \d/);
+  } finally {
+    await page.request.get('http://localhost:4110/__fake/slow?ms=0');
+  }
+});
+
+test('voces: la tarjeta lista las voces del servicio y del navegador/PC, se elige una y se recuerda', async ({ page }) => {
+  await page.addInitScript(() => {
+    const voices = [{ name: 'Alex', lang: 'en-US', localService: true, voiceURI: 'alex', default: true }, { name: 'Paulina', lang: 'es-MX', localService: true, voiceURI: 'paulina' }, { name: 'Jorge en línea', lang: 'es-ES', localService: false, voiceURI: 'jorge' }];
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: { getVoices: () => voices, addEventListener() { /* sin eventos */ }, removeEventListener() { /* sin eventos */ }, cancel() { /* nada */ }, speak() { /* nada */ } } });
+  });
+  const ttsBodies: string[] = [];
+  page.on('request', r => { if (r.url().endsWith('/api/voice/tts')) ttsBodies.push(String(r.postData() ?? '')); });
+  await loginOrb(page);
+  await page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: 'Voces', exact: true }).click();
+  const win = page.getByTestId('win-voces');
+  await expect(win).toBeVisible();
+  await expect(win.getByText('Zephyr')).toBeVisible();            // voces del servicio (Gemini)
+  await expect(win.getByText('Paulina')).toBeVisible();           // voces de la PC / navegador
+  await expect(win.getByText('Jorge en línea')).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/voces.png` });
+  await win.getByLabel('Zephyr').check();
+  await page.reload();
+  await expect(page.getByTestId('orbscreen')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: 'Voces', exact: true }).click();
+  await expect(page.getByTestId('win-voces').getByLabel('Zephyr')).toBeChecked();   // se recuerda
+  // La voz elegida es la que se pide al servidor al hablar.
+  await page.getByRole('button', { name: 'Teclado' }).click();
+  await page.getByLabel('Mensaje para Nyvo').fill('¿Qué clientes tengo?');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect.poll(() => ttsBodies.some(b => b.includes('"voice":"Zephyr"')), { timeout: 15_000 }).toBe(true);
 });

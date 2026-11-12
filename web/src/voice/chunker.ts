@@ -1,3 +1,5 @@
+import { toSpeakable } from './speechText.js';
+
 /**
  * Parte una respuesta en trozos para leerla por partes: el primero es corto (la voz empieza antes) y el resto
  * se sintetiza mientras suena el anterior. Corta en puntuación, no a mitad de frase.
@@ -5,7 +7,7 @@
 export function chunkForSpeech(text: string, opts: { firstMax?: number; max?: number } = {}): string[] {
   const firstMax = opts.firstMax ?? 120;
   const max = opts.max ?? 260;
-  const clean = text.replace(/\s+/g, ' ').trim();
+  const clean = toSpeakable(text).replace(/\s+/g, ' ').trim();   // sin asteriscos ni formato: la voz los leería
   if (!clean) return [];
   const sentences = clean.match(/[^.!?…;:\n]+[.!?…;:]*\s*/g)?.map(s => s.trim()).filter(Boolean) ?? [clean];
   const out: string[] = [];

@@ -19,6 +19,7 @@ import { cancelJob, listJobs, retryJob } from '../jobs/queue.js';
 import { runTick } from '../jobs/tick.js';
 import * as memory from '../memory/memory.js';
 import { synthesize, voiceMissing, voiceProvider } from '../voice/tts.js';
+import { serverVoices } from '../voice/voices.js';
 import { sttMissing, sttProvider, transcribeAudio } from '../voice/stt.js';
 
 interface Ctx { req: Req; res: Res; deps: Deps; params: Record<string, string>; url: URL; user: User }
@@ -264,6 +265,7 @@ priv('GET', '/api/llm/status', async ({ res, deps }) => {
 
 priv('GET', '/api/voice/config', async ({ res, deps }) => json(res, 200, {
   provider: voiceProvider(deps.cfg), missingEnv: voiceMissing(deps.cfg), maxChars: deps.cfg.limits.ttsMaxChars,
+  voices: voiceMissing(deps.cfg).length ? [] : serverVoices(voiceProvider(deps.cfg), deps.cfg.env),
   stt: sttProvider(deps.cfg) === 'groq' ? !sttMissing(deps.cfg.env).length : Boolean(deps.llm), sttProvider: sttProvider(deps.cfg), sttMissing: sttProvider(deps.cfg) === 'groq' ? sttMissing(deps.cfg.env) : deps.llm ? [] : sttMissing(deps.cfg.env), wakeWord: 'Oye Nyvo'
 }));
 
@@ -271,7 +273,8 @@ priv('POST', '/api/voice/tts', async ({ req, res, deps, user }) => {
   const body = await readJson(req, 50_000);
   if (!(await allowAttempt(deps.db, `tts:${user.id}`, 90, 60))) throw new HttpError(429, 'Demasiadas peticiones de voz. Espera un minuto.');
   const text = str(body.text, 20_000, 'texto');
-  const speech = await synthesize(deps.cfg, deps.fetch, text);
+  const voice = typeof body.voice === 'string' ? body.voice.slice(0, 60) : undefined;
+  const speech = await synthesize(deps.cfg, deps.fetch, text, undefined, voice);
   binary(res, speech.mimeType, speech.audio);
 });
 

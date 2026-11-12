@@ -19,6 +19,16 @@ export function cleanReply(text: string): string {
     .replace(new RegExp(`\\b(?:[Ss]egún|[Dd]e acuerdo con|[Pp]or parte de)\\s+(?:${NAMES})\\s*,?\\s+`, 'g'), '')
     // «Johan me informa que …», «Rose me avisa de que …»
     .replace(new RegExp(`\\b(?:${NAMES})\\s+me\\s+(?:informa|dice|indica|comenta|avisa|cuenta|confirma|reporta)\\s+(?:de\\s+)?que\\s+`, 'g'), '');
+  // La interfaz no interpreta Markdown (se vería «**así**») y la voz lo leería: se quita el formato y se dejan las viñetas como «•».
+  t = t
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`\n]*)`/g, '$1')
+    .replace(/\[([^\]]+)\]\((?:[^)]*)\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^(\s*)[*•]\s+/gm, '$1• ')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(^|[\s(¡¿])\*([^\s*][^*\n]*?)\*(?=[\s).,;:!?]|$)/g, '$1$2')
+    .replace(/\*{2,}/g, '');
   t = t.replace(/[ \t]{2,}/g, ' ').trim();
   // Tras quitar un prefijo, la frase puede quedar en minúscula
   t = t.replace(/(^|[.!?¡¿]\s+|\n)([a-záéíóúñ])/g, (_m, pre: string, c: string) => pre + cap(c));

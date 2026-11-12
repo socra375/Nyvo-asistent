@@ -16,11 +16,19 @@ async function loginOrb(page: Page, base = '') {
   await expect(page.getByTestId('orbscreen')).toBeVisible();
 }
 
-/** Entra y abre el panel completo («Centro de mando»). */
-async function login(page: Page, base = '') {
+/** Abre tarjetas flotantes sobre el orbe desde la barra superior (cada botón abre o cierra la suya). */
+async function openCards(page: Page, ...names: string[]) {
+  for (const n of names) {
+    const b = page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: n, exact: true });
+    if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
+  }
+}
+
+/** Entra y deja abiertas las tarjetas de uso diario: clientes, conversación, trabajos, archivos y Notion. */
+async function login(page: Page, base = '', cards = ['Clientes', 'Conversación', 'Trabajos', 'Archivos', 'Notion']) {
   await loginOrb(page, base);
-  await page.getByRole('button', { name: 'Panel', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'Centro de mando' })).toBeVisible();
+  await openCards(page, ...cards);
+  if (cards.includes('Conversación')) await expect(page.getByTestId('panel-chat')).toBeVisible();
 }
 
 async function sendChat(page: Page, text: string) {
@@ -43,7 +51,7 @@ test('inicio de sesión: rechaza contraseña incorrecta y entra con la correcta'
   await expect(page.getByRole('link', { name: 'Entrar con Google' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/login.png` });
   await login(page);
-  await expect(page.getByText(OWNER)).toBeVisible();
+  await expect(page.getByTestId('orbscreen')).toBeVisible();
 });
 
 test('logo y PWA: el logo se ve de verdad y el navegador puede leer manifest e iconos', async ({ page }) => {
@@ -76,7 +84,7 @@ test('logo y PWA: el logo se ve de verdad y el navegador puede leer manifest e i
 
   // Dentro de la app, el logo aparece también en la barra superior.
   await login(page);
-  const brand = page.locator('.brand-logo');
+  const brand = page.locator('.orb-logo');
   await expect(brand).toBeVisible();
   expect(await brand.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
 });
@@ -92,7 +100,7 @@ test('centro de mando: clientes de AINova, KPIs y búsqueda', async ({ page }) =
   await expect(clients.getByText('Pedro Ruiz')).toBeVisible();
   await clients.getByRole('button', { name: 'Actualizar clientes' }).click();
   await expect(clients.getByText('Pedro Ruiz')).toBeVisible();
-  await expect(page.getByTestId('core')).toHaveAttribute('data-state', 'reposo');
+  await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
   await expect(page.getByTestId('panel-notion')).toContainText('Aún no hay notas');
 });
 
@@ -108,6 +116,7 @@ test('Drive: «falta conectar» → conectar con Google (permiso solo de Drive) 
   expect(scope).toContain('drive.metadata.readonly');
   expect(scope).not.toContain('gmail');
   await expect(page.getByRole('status').filter({ hasText: 'Conectado: google-drive' })).toBeVisible();
+  await openCards(page, 'Archivos');   // al volver de Google se abre Conectores; Archivos se abre otra vez
   await expect(drive.getByRole('link', { name: 'Plan comercial 2026' })).toHaveAttribute('href', 'https://docs.google.com/document/d/f1');
   await expect(drive.getByText('★ Doc')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/centro-de-mando.png`, fullPage: true });
@@ -168,11 +177,11 @@ test('trabajo en segundo plano: aparece en Trabajos y su resultado llega al chat
 test('voz: pulsar para hablar (micrófono falso), transcribe y envía; lectura en voz alta pide audio WAV', async ({ page }) => {
   await login(page);
   await page.getByText('Leer respuestas en voz alta').click();
-  await page.getByRole('button', { name: 'Hablar con Nyvo' }).click();
-  await expect(page.getByTestId('core')).toHaveAttribute('data-state', 'escuchando');
+  await chat(page).getByRole('button', { name: 'Hablar con Nyvo' }).click();
+  await expect(chat(page).getByRole('button', { name: 'Detener grabación' })).toBeVisible();
   await page.waitForTimeout(800);
   const tts = page.waitForResponse(r => r.url().endsWith('/api/voice/tts'));
-  await page.getByRole('button', { name: 'Detener grabación' }).click();
+  await chat(page).getByRole('button', { name: 'Detener grabación' }).click();
   await expect(chat(page).getByTestId('msg-user').last()).toContainText('muéstrame mis clientes');
   await expect(lastAssistant(page)).toContainText('Laura Méndez');
   const res = await tts;
@@ -270,9 +279,9 @@ test('conversaciones: se listan y se pueden reabrir; «Nueva» limpia el chat', 
 });
 
 test('conectores: estados, variables y ajuste de Notion', async ({ page }) => {
-  await login(page);
-  await page.getByRole('tab', { name: 'Conectores' }).click();
-  await expect(page.getByRole('heading', { name: 'Conectores', level: 1 })).toBeVisible();
+  await login(page, '', ['Clientes']);
+  await openCards(page, 'Conectores');
+  await expect(page.getByTestId('win-conectores')).toBeVisible();
   for (const id of ['ainova', 'notion', 'google-drive', 'memoria', 'gemini', 'voz']) {
     await expect(page.getByTestId(`conector-${id}`)).toContainText('Listo');
   }
@@ -286,17 +295,15 @@ test('conectores: estados, variables y ajuste de Notion', async ({ page }) => {
   const ainova = page.getByTestId('conector-ainova');
   await ainova.getByText('Activo').click();
   await expect(ainova).toContainText('Desactivado');
-  await page.getByRole('tab', { name: 'Centro de mando' }).click();
   await expect(page.getByTestId('panel-clientes')).toContainText('Conector desactivado');
-  await page.getByRole('tab', { name: 'Conectores' }).click();
   await page.getByTestId('conector-ainova').getByText('Activo').click();
   await expect(page.getByTestId('conector-ainova')).toContainText('Listo');
   await page.screenshot({ path: `${SHOTS}/conectores.png`, fullPage: true });
 });
 
 test('memoria: añadir, borrar, estilo, exportar y borrar todo', async ({ page }) => {
-  await login(page);
-  await page.getByRole('tab', { name: 'Memoria' }).click();
+  await login(page, '', []);
+  await openCards(page, 'Memoria');
   await page.getByLabel('Nueva nota').fill('Prefiero correos breves');
   await page.getByRole('button', { name: 'Añadir' }).click();
   await expect(page.getByText('Prefiero correos breves')).toBeVisible();
@@ -334,7 +341,7 @@ test('sin conectores configurados: cada panel dice qué variable falta, sin erro
   await expect(page.getByTestId('panel-notion').getByText('NOTION_TOKEN')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Entrar con Google' })).toHaveCount(0);
   await expect(page.getByText(/Voz: falta configurar/)).toHaveCount(0);   // sin configurar nada, la voz es la del navegador (no falta nada)
-  await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Hablar con Nyvo' }).first()).toBeDisabled();
   await sendChat(page, 'hola');
   await expect(lastAssistant(page)).toContainText('Falta configurar un motor de IA');
   await page.getByTestId('panel-clientes').getByRole('button', { name: 'Ver conectores →' }).click();
@@ -354,7 +361,7 @@ test('móvil: el HUD cabe sin desplazamiento horizontal @movil', async ({ page }
 test('estados hover y foco: pestañas, botones y filas responden al puntero y al teclado', async ({ page }) => {
   await login(page);
   const bg = (loc: ReturnType<Page['locator']>) => loc.evaluate(el => getComputedStyle(el).backgroundColor);
-  const tab = page.getByRole('tab', { name: 'Memoria' });
+  const tab = page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: 'Memoria', exact: true });
   const before = await bg(tab);
   await tab.hover();
   await expect.poll(() => bg(tab)).not.toBe(before);

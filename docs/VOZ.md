@@ -54,3 +54,10 @@ Este diseño es por turnos (STT → texto → TTS por frases). La latencia hasta
 - **Transcripción con respaldo.** Groq (Whisper) y Gemini se respaldan entre sí: si el elegido falla (cuota, caída, red, o un audio que su decodificador no acepta) se prueba el otro si tiene clave. Con `STT_PROVIDER` fijado no hay segundo intento. La transcripción de Gemini también pide el «pensar» mínimo (era lo más lento de la escucha). Si fallan los dos, el error dice cuál y por qué, sin detalles crudos.
 
 **Probado:** pruebas unitarias de todo lo anterior con servidores simulados, y en Chromium real que con el servidor respondiendo «cuota agotada» la respuesta suena con la voz del navegador y se avisa una vez (la prueba falla con el cliente anterior). **No probado:** los servicios reales de Gemini TTS, ElevenLabs, Groq Whisper y Gemini (la red de desarrollo no llega a ellos); en especial, qué versión de Gemini hay detrás de `gemini-flash-lite-latest` y qué ajuste de «pensar» acepta, que la escalera descubre en uso.
+
+## Tarjeta «Voces» y lectura limpia
+
+- La tarjeta **Voces** (barra superior del orbe) lista las voces del servicio (Gemini: catálogo o `GEMINI_TTS_VOICES`; ElevenLabs: `ELEVENLABS_VOICES` = `Nombre:id`) y todas las voces de la PC y del navegador (primero las de español). Se elige motor, voz, velocidad y volumen; se recuerda en ese navegador. El servidor solo acepta voces de su lista.
+- Lo que se lee en voz alta nunca incluye asteriscos, almohadillas, enlaces, código ni emojis (`web/src/voice/speechText.ts`; el servidor también limpia en `cleanReply`). Los subtítulos conservan viñetas y saltos de línea.
+- Si el agente tarda, Nyvo dice una frase corta; al llegar la respuesta se corta esa frase (si sigue sonando) y se lee la respuesta. Si la voz del navegador no puede leerla, se muestra el error en vez de callar.
+- Cada turno muestra cuánto tardó y cuánto tardó cada parte (Rose, Johan, Mia, Nyvo).
