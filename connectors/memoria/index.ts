@@ -1,5 +1,5 @@
 import type { Connector, Tool } from '../types.js';
-import { addNote, relevantNotes } from '../../server/memory/memory.js';
+import { addNote, looksLikeInstruction, relevantNotes } from '../../server/memory/memory.js';
 
 /** Memoria interna de Nyvo (base de datos propia): no cambia datos externos, no pide tarjeta. */
 const tools: Tool[] = [
@@ -9,7 +9,11 @@ const tools: Tool[] = [
     parameters: { type: 'object', properties: { nota: { type: 'string' }, etiquetas: { type: 'array', items: { type: 'string' } } }, required: ['nota'] },
     mutates: false,
     run: async (a, ctx) => {
-      const n = await addNote(ctx.deps.db, ctx.userId, String(a.nota ?? ''), a.etiquetas);
+      const texto = String(a.nota ?? '');
+      if (looksLikeInstruction(texto) || (Array.isArray(a.etiquetas) && looksLikeInstruction(a.etiquetas.join(' ')))) {
+        return { guardado: false, error: 'No guardé esa nota porque parece una instrucción para el sistema. La memoria solo guarda datos y preferencias del negocio; reformúlala como un dato si es lo que querías.' };
+      }
+      const n = await addNote(ctx.deps.db, ctx.userId, texto, a.etiquetas);
       return { id: n.id, guardado: true };
     }
   },

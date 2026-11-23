@@ -92,8 +92,20 @@ export function isSameOriginWrite(req: Req): boolean {
   try { return new URL(origin).host === host; } catch { return false; }
 }
 
-export function clientIp(req: Req): string {
-  return String(req.headers['x-forwarded-for'] ?? '').split(',')[0]?.trim() || req.socket?.remoteAddress || 'desconocida';
+/**
+ * IP del cliente para límites y auditoría.
+ * En Vercel, la documentación (vercel.com/docs/headers/request-headers) indica que la plataforma SOBRESCRIBE x-forwarded-for
+ * y no reenvía IPs externas; x-vercel-forwarded-for es idéntica y no se pierde si hay un proxy delante. Solo ahí se confían.
+ * Fuera de Vercel (local, pruebas, otro proxy) las cabeceras las puede falsear el cliente: se usa la IP de la conexión.
+ * DUDA abierta: si se pone otro proxy delante de Vercel, hay que revisar esta función.
+ */
+export function clientIp(req: Req, env: Record<string, string | undefined> = process.env): string {
+  if (env.VERCEL) {
+    const h = req.headers['x-vercel-forwarded-for'] ?? req.headers['x-forwarded-for'];
+    const ip = String(Array.isArray(h) ? h[0] : h ?? '').split(',')[0]?.trim();
+    if (ip) return ip;
+  }
+  return req.socket?.remoteAddress || 'desconocida';
 }
 
 /** Origen público de la app (para URLs de retorno de OAuth). */

@@ -3,7 +3,7 @@ import type { Role } from '../../connectors/types.js';
 import type { FunctionDecl, Turn } from '../llm/types.js';
 import { toolsForRole, type BoundTool } from '../../connectors/registry.js';
 import { createConfirmCard, createUndoCard, type Card } from '../actions/actions.js';
-import { relevantNotes } from '../memory/memory.js';
+import { notesBlock, relevantNotes } from '../memory/memory.js';
 import { audit } from '../audit.js';
 import { hemisphereFor, type OnEvent } from './events.js';
 import { claimsDone, CLAIM_NUDGE, isEmptyPromise, PROMISE_NUDGE_SPECIALIST } from './promises.js';
@@ -70,7 +70,7 @@ export async function runSpecialist(deps: Deps, p: { userId: string; conversatio
       unavailable.length ? `No disponibles ahora: ${unavailable.map(u => `${u.title} (${u.state.replace('_', ' ')})`).join(', ')}.` : '',
       SECURITY_RULES
     ].filter(Boolean).join('\n\n');
-    const turns: Turn[] = [{ role: 'user', parts: [{ text: `Tarea: ${p.task}${notes.length ? `\n\nNotas del usuario que pueden ayudar:\n${notes.map(n => `- ${n.content}`).join('\n')}` : ''}` }] }];
+    const turns: Turn[] = [{ role: 'user', parts: [{ text: `Tarea: ${p.task}${notes.length ? `\n\n${notesBlock(notes)}` : ''}` }] }];
 
     let calls = 0;
     let partial = false;

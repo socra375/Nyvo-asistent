@@ -39,6 +39,12 @@ const priv = (m: string, p: string, h: Handler) => add(m, p, true, h);
 
 const secure = (deps: Deps, req: Req) => deps.cfg.production || String(req.headers['x-forwarded-proto'] ?? '').startsWith('https');
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Límite por usuario (compartido entre instancias vía la tabla rate_limits). Responde 429 en español al superarlo. */
+async function limitePorUsuario(deps: Deps, bucket: string, userId: string, max: number, mensaje: string) {
+  if (!(await allowAttempt(deps.db, `${bucket}:${userId}`, max, 60))) throw new HttpError(429, mensaje);
+}
+const MSG_CHAT = 'Demasiadas peticiones al chat. Espera un minuto e inténtalo de nuevo.';
+const MSG_TARJETAS = 'Demasiadas acciones sobre tarjetas. Espera un minuto e inténtalo de nuevo.';
 const uuidParam = (v: string | undefined) => { if (!v || !isUuid(v)) throw new HttpError(400, 'Id inválido.'); return v; };
 
 // ───────────────────────── Sesión ─────────────────────────
@@ -162,6 +168,7 @@ priv('DELETE', '/api/conversations/:id', async ({ res, deps, user, params }) => 
 });
 
 priv('POST', '/api/chat', async ({ req, res, deps, user }) => {
+  await limitePorUsuario(deps, 'chat', user.id, 30, MSG_CHAT);
   const body = await readJson(req);
   const message = str(body.message, 4000, 'mensaje');
   const conversationId = body.conversationId ? uuidParam(String(body.conversationId)) : null;
@@ -176,6 +183,7 @@ priv('POST', '/api/chat', async ({ req, res, deps, user }) => {
  */
 priv('POST', '/api/chat/stream', async ({ req, res, deps, user }) => {
   // Se valida todo ANTES de abrir el flujo: un error de petición sale como JSON normal con su código HTTP.
+  await limitePorUsuario(deps, 'chat', user.id, 30, MSG_CHAT);
   const body = await readJson(req);
   const message = str(body.message, 4000, 'mensaje');
   const conversationId = body.conversationId ? uuidParam(String(body.conversationId)) : null;
@@ -193,9 +201,9 @@ priv('POST', '/api/chat/stream', async ({ req, res, deps, user }) => {
 });
 
 priv('GET', '/api/actions', async ({ res, deps, user }) => json(res, 200, { cards: await listCards(deps, user.id) }));
-priv('POST', '/api/actions/:id/confirm', async ({ res, deps, user, params }) => json(res, 200, { card: await confirmCard(deps, user.id, uuidParam(params.id)) }));
+priv('POST', '/api/actions/:id/confirm', async ({ res, deps, user, params }) => { await limitePorUsuario(deps, 'tarjetas', user.id, 60, MSG_TARJETAS); json(res, 200, { card: await confirmCard(deps, user.id, uuidParam(params.id)) }); });
 priv('POST', '/api/actions/:id/cancel', async ({ res, deps, user, params }) => json(res, 200, { card: await cancelCard(deps, user.id, uuidParam(params.id)) }));
-priv('POST', '/api/actions/:id/undo', async ({ res, deps, user, params }) => json(res, 200, { card: await undoCard(deps, user.id, uuidParam(params.id)) }));
+priv('POST', '/api/actions/:id/undo', async ({ res, deps, user, params }) => { await limitePorUsuario(deps, 'tarjetas', user.id, 60, MSG_TARJETAS); json(res, 200, { card: await undoCard(deps, user.id, uuidParam(params.id)) }); });
 
 // ───────────────────────── Trabajos ─────────────────────────
 
