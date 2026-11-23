@@ -65,7 +65,7 @@ export function Sidebar({ open, collapsed, setCollapsed, menuOpen, setMenuOpen, 
             })}
           </div>
         ))}
-        <button type="button" className="orb-nav-btn orb-collapse" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}
+        <button type="button" className="orb-nav-btn orb-collapse" onClick={() => setCollapsed(!collapsed)}
           aria-label={collapsed ? 'Expandir barra lateral' : 'Contraer barra lateral'} title={collapsed ? 'Expandir' : 'Contraer'}>
           {collapsed ? ICONS.expandir : ICONS.colapsar}<span className="orb-nav-l">Contraer</span>
         </button>

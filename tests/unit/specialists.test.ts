@@ -11,6 +11,6 @@ test('estado del especialista: el de su sección, y «No configurado» solo si f
   // Nyvo: Notion y Drive; solo si faltan ambos.
   assert.equal(specialistStatus('nyvo', 'reposo', { notion: 'falta_configurar', 'google-drive': 'listo' }), 'Disponible');
   assert.equal(specialistStatus('nyvo', 'reposo', { notion: 'falta_configurar', 'google-drive': 'falta_configurar' }), 'No configurado');
-  // Mia no tiene conector: nunca «No configurado».
-  assert.equal(specialistStatus('mia', 'reposo', { ainova: 'falta_configurar' }), 'Disponible');
+  // Mia no tiene conector: nunca «No configurado»; sin capacidades ni agenda conectada: «Sin conectar».
+  assert.equal(specialistStatus('mia', 'reposo', { ainova: 'falta_configurar' }), 'Sin conectar');
 });

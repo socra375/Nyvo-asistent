@@ -49,8 +49,9 @@ export const SPECIALISTS: Record<Hemi, SpecialistInfo> = {
 export type ConnectorMap = Record<string, ConnectorState>;
 
 /** Estado visible de un especialista: el de su sección en el orbe, salvo «No configurado» cuando falta configurar su conector. */
-export function specialistStatus(h: Hemi, mode: SectionMode, conns: ConnectorMap | null): 'Trabajando' | 'Listo' | 'Disponible' | 'No configurado' {
+export function specialistStatus(h: Hemi, mode: SectionMode, conns: ConnectorMap | null): 'Trabajando' | 'Listo' | 'Disponible' | 'Sin conectar' | 'No configurado' {
   const info = SPECIALISTS[h];
+  if (info.capabilities.length === 0) return 'Sin conectar';   // Mia: la agenda no está conectada
   if (conns && info.connectors.length) {
     const missing = info.connectors.map(c => conns[c] === 'falta_configurar');
     if (info.needs === 'todos' ? missing.every(Boolean) : missing.some(Boolean)) return 'No configurado';

@@ -71,6 +71,7 @@ export function OrbScreen({ onActivity, notify, logout, refreshKey, jobs, jobsAc
   const [menuOpen, setMenuOpen] = useState(false);
   const [specialist, setSpecialist] = useState<Hemi | null>(null);
   const specRef = useRef<Hemi | null>(null);
+  const menuRef = useRef(false);
   const [conns, setConns] = useState<ConnectorMap | null>(null);
   const [open, setOpen] = useState<WinId[]>(initialOpen ? [initialOpen] : []);
   const pending = v.cards.filter(c => c.status === 'pending' || (c.kind === 'undo' && c.status === 'done'));
@@ -90,9 +91,10 @@ export function OrbScreen({ onActivity, notify, logout, refreshKey, jobs, jobsAc
   const close = (id: WinId) => setOpen(o => o.filter(x => x !== id));
   const show = (id: WinId) => setOpen(o => (o.includes(id) ? o : [...o, id]));
   specRef.current = specialist;
-  // Escape cierra la última tarjeta abierta.
+  menuRef.current = menuOpen;
+  // Escape: con el menú móvil abierto cierra solo el menú; si no, la última tarjeta abierta.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) { setMenuOpen(false); if (specRef.current) setSpecialist(null); else setOpen(o => o.slice(0, -1)); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) { if (menuRef.current) { setMenuOpen(false); return; } if (specRef.current) setSpecialist(null); else setOpen(o => o.slice(0, -1)); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -142,7 +144,7 @@ export function OrbScreen({ onActivity, notify, logout, refreshKey, jobs, jobsAc
 
       <div className="orb-wrap">
       <button type="button" className="orb-hit" onClick={v.toggle} disabled={!v.sttReady && !v.live}
-        aria-pressed={v.live} aria-label={v.live ? 'Detener la conversación por voz' : 'Hablar con Nyvo'}
+        aria-pressed={v.live} aria-label="Hablar con Nyvo"
         title={v.sttReady ? '' : 'Falta configurar la transcripción de voz (GROQ_API_KEY). Puedes escribirle con el teclado.'}>
         <Orb state={v.state} sections={v.sections} getLevel={v.getLevel} />
       </button>

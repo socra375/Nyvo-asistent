@@ -86,7 +86,7 @@ test('especialistas: la tarjeta muestra el estado real y no ejecuta nada externo
   await expect(page.getByTestId('spec-johan-estado')).toHaveText('Disponible');
   await page.getByTestId('sec-mia').click();
   await expect(page.getByTestId('spec-mia')).toContainText('NO está conectada');
-  await expect(page.getByTestId('spec-mia-estado')).toHaveText('Disponible');
+  await expect(page.getByTestId('spec-mia-estado')).toHaveText('Sin conectar');
   await page.getByTestId('sec-nyvo').click();
   await expect(page.getByTestId('spec-nyvo')).toContainText('Notion');
   await expect(page.getByTestId('spec-nyvo')).toContainText('Drive');
@@ -107,7 +107,7 @@ test('especialistas: sin conectores configurados dicen «No configurado» (Mia s
     await expect(page.getByTestId(`spec-${s}-estado`)).toHaveText('No configurado');
   }
   await page.getByTestId('sec-mia').click();
-  await expect(page.getByTestId('spec-mia-estado')).toHaveText('Disponible');
+  await expect(page.getByTestId('spec-mia-estado')).toHaveText('Sin conectar');
 });
 
 test('móvil: menú desplegable accesible y sin desplazamiento horizontal @movil', async ({ page }) => {
@@ -156,4 +156,19 @@ test.describe('capturas a doble resolución', () => {
     await page.waitForTimeout(500);
     await page.screenshot({ path: `${SHOTS}/nav-movil@2x.png` });
   });
+});
+
+test('móvil: Escape con el menú abierto cierra solo el menú y no las tarjetas @movil', async ({ page }) => {
+  await loginOrb(page);
+  const menu = page.getByRole('button', { name: 'Menú', exact: true });
+  await menu.click();
+  await page.getByRole('button', { name: 'Clientes', exact: true }).click();
+  await expect(page.getByTestId('win-clientes')).toBeVisible();
+  await menu.click();
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('win-clientes')).toBeVisible();   // la tarjeta sigue abierta
+  await page.keyboard.press('Escape');                              // con el menú cerrado, cierra la tarjeta
+  await expect(page.getByTestId('win-clientes')).toHaveCount(0);
 });
