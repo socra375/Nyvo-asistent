@@ -33,12 +33,16 @@ describe('consultas claras de solo lectura (ruta rápida)', () => {
       assert.equal(r?.specialist, 'negocios', m);
       assert.equal(r?.task, m);
     }
+    for (const m of ['que debo cobrar a cada cliente', '¿Qué debo cobrar a cada cliente?', 'cuanto debo cobrar este mes a mis clientes', 'a quien debo cobrar', '¿Quién me debe dinero? dime los clientes', 'cuanto me deben mis clientes', 'dame los cobros por cobrar']) {
+      assert.equal(fastRoute(m)?.specialist, 'negocios', m);
+      assert.equal(fastRoute(m)?.task, m);
+    }
     for (const m of ['Lista los archivos principales de Drive', '¿Qué hay en mi drive?']) assert.equal(fastRoute(m)?.specialist, 'documentos', m);
   });
 
   test('ante cualquier duda sigue el camino completo: cambia datos, pide redactar o resumir, o depende de lo dicho antes', () => {
     for (const m of [
-      'Marca como pagado el cobro de Café Brisa', 'Crea un cliente nuevo', 'Responde al cliente que escribió', 'Envíale un correo a los clientes', 'Anota que Laura prefiere las tardes',
+      'cobra a Laura', 'Cóbrale a Pedro', 'marca como cobrado', 'cobra a Laura lo que debe', 'Cobrale a mis clientes', 'Marca como pagado el cobro de Café Brisa', 'Crea un cliente nuevo', 'Responde al cliente que escribió', 'Envíale un correo a los clientes', 'Anota que Laura prefiere las tardes',
       'Haz un reporte de cobros', 'Resume los cobros de este mes', 'Dame un informe de clientes', 'Redacta un correo para mis clientes', 'Guarda esto en Notion',
       '¿Qué cobros tiene?', 'Y los de Pedro, ¿qué clientes tengo?', 'También dame los proyectos', 'Ahora los cobros', 'Los mismos clientes de antes',
       'hola', 'gracias', '¿Quién eres?', 'Clientes', '¿Qué tiempo hace?', 'Qué debería hacer con mis clientes', 'Recomiéndame qué cobros priorizar',
@@ -85,6 +89,15 @@ describe('el turno de punta a punta', needsDb, () => {
     assert.ok(!llm.requests.some(isMain), 'el principal ni se llamó');
     assert.equal(events[0]?.tipo, 'pensando');
     assert.deepEqual(events.filter(e => e.tipo === 'hemisferio').map(e => e.tipo === 'hemisferio' && [e.id, e.estado]), [['johan', 'activo'], ['johan', 'listo']]);
+  });
+
+  test('«que debo cobrar a cada cliente»: ruta rápida, una delegación y sin pasar por el principal', async () => {
+    reset();
+    const llm = scriptedLlm(req => isMain(req) ? { text: 'De nada, ¿en qué más puedo ayudarte?' } : { text: 'Laura te debe 450 dólares.' });
+    const r = await runTurn(makeDeps(db, noConnectors, { llm }), { userId, conversationId: null, message: 'que debo cobrar a cada cliente' });
+    assert.equal(r.reply, 'Laura te debe 450 dólares.');
+    assert.equal(r.timing!.via, 'rapida');
+    assert.ok(!llm.requests.some(isMain));
   });
 
   test('en voz, el especialista ya recibe la petición de responder corto', async () => {

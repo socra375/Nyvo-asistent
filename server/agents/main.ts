@@ -11,7 +11,8 @@ import type { OnEvent } from './events.js';
 import { withTiming, type Timing } from '../llm/timing.js';
 import { cleanReply } from './persona.js';
 import { claimsDone, CLAIM_NUDGE, isEmptyPromise, PROMISE_NUDGE_MAIN } from './promises.js';
-import { fastRoute } from './fastRoute.js';
+import { fastRoute, topicOf } from './fastRoute.js';
+import { COURTESY_FALLBACK, COURTESY_NUDGE, isCourtesyOnly, isSocial, isVagueOrder, VAGUE_ORDER_HINT } from './ordenes.js';
 
 const MAX_MAIN_STEPS = 4;
 /** Delegaciones a especialistas por petición (ahorra cuota y evita bucles). */
@@ -92,7 +93,8 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   const d: Deps = { ...deps, llm: timed };
   const turns: Turn[] = history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
   while (turns[0]?.role === 'model') turns.shift(); // el historial debe empezar con el usuario
-  turns.push({ role: 'user', parts: [{ text: message }] });
+  // Orden breve sin tema («trabaja»): el modelo recibe una nota de contexto; el mensaje guardado y el que ve el dueño no cambian.
+  turns.push({ role: 'user', parts: [{ text: isVagueOrder(message) ? message + VAGUE_ORDER_HINT : message }] });
   const system = mainSystemPrompt(await getStyle(deps.db, p.userId), { voice: p.voice });
   p.onEvent?.({ tipo: 'pensando' });
   const cards: Card[] = [];
@@ -105,6 +107,9 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
   /** ¿Se ejecutó ya alguna delegación en este turno? Sin ella, una promesa o un «ya lo hice» son falsos. */
   let toolWork = false;
   let nudged = false;
+  /** El aviso de «no respondas con cortesía» ya se dio (comparte el único aviso por turno con `nudged`). */
+  let courtesyNudged = false;
+  const social = isSocial(message);
   const env = deps.cfg.env;
   const voiceHint = p.voice ? VOICE_TASK_HINT : '';
 
@@ -140,6 +145,28 @@ export async function runTurn(deps: Deps, p: { userId: string; conversationId: s
           nudged = true;
           turns.push({ role: 'user', parts: [{ text: promise ? PROMISE_NUDGE_MAIN : CLAIM_NUDGE }] });
           continue;
+        }
+        // Cortesía como respuesta a algo que no es social («De nada, ¿en qué más puedo ayudarte?» ante una pregunta o una orden): no hace ni
+        // pregunta nada. Se avisa una vez; si insiste, se consulta directo al especialista del tema o, si no hay tema, se pregunta algo útil.
+        if (!toolWork && !social && isCourtesyOnly(resp.text)) {
+          if (!nudged && !last) {
+            nudged = courtesyNudged = true;
+            turns.push({ role: 'user', parts: [{ text: COURTESY_NUDGE }] });
+            continue;
+          }
+          if (courtesyNudged || last) {
+            const topic = topicOf(message);
+            const left = budgetMs - (Date.now() - start) - safety - 1000;
+            if (topic && left > 3000) {
+              const r = await runSpecialist(d, { userId: p.userId, conversationId: conv.id, specialist: topic, task: message + voiceHint, deadlineMs: Math.min(deps.cfg.limits.specialistDeadlineMs, left), onEvent: p.onEvent });
+              cards.push(...r.cards);
+              partial ||= r.partial;
+              toolWork = true; delegations++;
+              reply = directReply(r, !!p.voice) ?? (r.text.trim() || COURTESY_FALLBACK);
+              via = 'directa';
+            } else reply = COURTESY_FALLBACK;
+            break;
+          }
         }
         reply = resp.text; break;
       }

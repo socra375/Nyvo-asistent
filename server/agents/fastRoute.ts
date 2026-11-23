@@ -12,7 +12,7 @@ import type { SpecialistId } from './specialists.js';
 
 const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-const READ = /\b(que|cuales|cuantos|cuantas|lista|listame|listar|muestra|muestrame|mostrar|dame|dime|ver|revisa|revisar|consulta|consultar|busca|buscar|hay|tengo|tienes)\b/;
+const READ = /\b(que|quien|quienes|cuanto|cuanta|cuales|cuantos|cuantas|lista|listame|listar|muestra|muestrame|mostrar|dame|dime|ver|revisa|revisar|consulta|consultar|busca|buscar|hay|tengo|tienes)\b/;
 const BUSINESS = /\b(clientes?|prospectos?|proyectos?|cobros?|pagos?|facturas?|servicios?|conversaciones)\b/;
 const DRIVE = /\b(drive|archivos principales|mis archivos)\b/;
 // Cualquier verbo o palabra que cambie datos, pida redactar/resumir o salga de «solo mirar».
@@ -27,6 +27,19 @@ const NOT_JUST_READING = new RegExp(`\\b(?:${[
 // Referencias a lo que se dijo antes: el especialista no ve la conversación, así que no se puede contestar sin ella.
 const REFERS_BACK = /\b(tiene|tienen|tenia|su|sus|ese|esa|eso|esos|esas|aquel|aquella|mismo|misma|mismos|mismas|anterior|anteriores|tambien|ademas|otra vez|de nuevo|entonces|luego|despues|ahora|y los|y las|y el|y la|y ese|y esa)\b/;
 
+// «Qué debo cobrar», «cuánto me deben», «por cobrar»: aquí «cobrar» es el TEMA de una consulta (lo que el dueño debe cobrar), no la orden de
+// cobrar a alguien. Se sustituyen por «cobros» antes de buscar verbos de cambio; «cobra a Laura» o «cóbrale a Pedro» siguen siendo órdenes.
+const COBRAR_CONSULTA = /\b(?:(?:debo|debemos|tengo que|tenemos que|tengo por|tenemos por|queda por|falta por|hay por) cobrar|por cobrar|(?:quien(?:es)?|cuanto|cuanta|cuantos|que) (?:me|nos) deb(?:e|en)|me deben?|nos deben?)\b/g;
+const neutral = (t: string) => t.replace(COBRAR_CONSULTA, ' que cobros ');
+
+/** ¿De qué tema habla el mensaje (negocio o Drive)? Sin mirar si es lectura o cambio: sirve para saber a quién preguntarle si el principal no contestó. */
+export function topicOf(message: string): SpecialistId | null {
+  const t = neutral(plain(message));
+  if (BUSINESS.test(t)) return 'negocios';
+  if (DRIVE.test(t)) return 'documentos';
+  return null;
+}
+
 export const MAX_FAST_CHARS = 140;
 
 export interface FastRoute { specialist: SpecialistId; task: string }
@@ -34,7 +47,7 @@ export interface FastRoute { specialist: SpecialistId; task: string }
 /** ¿Es una consulta clara de solo lectura? → a qué especialista va y qué tarea lleva; si no, null. */
 export function fastRoute(message: string): FastRoute | null {
   const raw = message.trim();
-  const t = plain(raw);
+  const t = neutral(plain(raw));
   if (!t || t.length > MAX_FAST_CHARS) return null;
   if (NOT_JUST_READING.test(t) || REFERS_BACK.test(t)) return null;
   if (!READ.test(t)) return null;
