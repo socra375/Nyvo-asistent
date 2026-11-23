@@ -222,7 +222,7 @@ test('orbe por voz: escucha, transcribe, responde en voz y se deja interrumpir @
   await loginOrb(page);
   await page.getByRole('button', { name: 'Hablar con Nyvo' }).click();   // abre el micrófono (el WAV falso empieza a sonar)
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'escuchando');
-  await expect(page.getByRole('button', { name: 'Detener la conversación por voz' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toHaveAttribute('aria-pressed', 'true');
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${SHOTS}/orbe-escuchando.png` });
 
@@ -246,9 +246,9 @@ test('orbe por voz: escucha, transcribe, responde en voz y se deja interrumpir @
   expect(await page.evaluate(() => (window as unknown as { __tts: number }).__tts)).toBeGreaterThanOrEqual(2);
 
   // Detener: cierra el micrófono y vuelve al reposo.
-  await page.getByRole('button', { name: 'Detener la conversación por voz' }).click();
+  await page.getByRole('button', { name: 'Hablar con Nyvo' }).click();
   await expect(page.getByTestId('orb')).toHaveAttribute('data-state', 'reposo');
-  await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Hablar con Nyvo' })).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('orbe en móvil: cabe sin desplazamiento y las cuatro secciones se ven @movil', async ({ page }) => {

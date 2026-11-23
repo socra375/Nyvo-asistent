@@ -1,13 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Orb } from './Orb';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Orb, OrbLabels } from './Orb';
 import { useOrbVoice } from '../voice/useOrbVoice';
 import { Chat, ActionCard } from '../panels/Chat';
 import { ClientsPanel, DrivePanel, JobsPanel, NotionPanel } from '../panels/panels';
 import { ConnectorsView } from '../panels/Connectors';
 import { MemoryView } from '../panels/Memory';
 import { Voices } from '../panels/Voices';
-import { SECTION_LABEL } from './orbModel';
-import type { Job } from '../lib/api';
+import { SECTION_LABEL, SECTIONS, type Hemi } from './orbModel';
+import { Sidebar } from './Sidebar';
+import { SpecialistCard } from './SpecialistCard';
+import { specialistStatus, type ConnectorMap } from './specialists';
+import { api, type ConnectorStatus, type Job } from '../lib/api';
 
 interface Props {
   onActivity: () => void;
@@ -22,10 +25,11 @@ interface Props {
   initialOpen?: WinId;
 }
 
-export type WinId = 'clientes' | 'archivos' | 'notion' | 'trabajos' | 'conversacion' | 'conectores' | 'memoria' | 'voces';
+export type WinId = 'actividad' | 'clientes' | 'archivos' | 'notion' | 'trabajos' | 'conversacion' | 'conectores' | 'memoria' | 'voces';
 
 /** Las tarjetas que se abren sobre el orbe (ya no hay un «panel» aparte): a qué lado van y cómo se llaman en la barra. */
 const WINDOWS: { id: WinId; label: string; side: 'izq' | 'der' }[] = [
+  { id: 'actividad', label: 'Actividad', side: 'izq' },
   { id: 'clientes', label: 'Clientes', side: 'izq' },
   { id: 'trabajos', label: 'Trabajos', side: 'izq' },
   { id: 'conversacion', label: 'Conversación', side: 'izq' },
@@ -63,21 +67,51 @@ export function OrbScreen({ onActivity, notify, logout, refreshKey, jobs, jobsAc
   const [captions, setCaptions] = useState(true);
   const [text, setText] = useState('');
   const [connVer, setConnVer] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [specialist, setSpecialist] = useState<Hemi | null>(null);
+  const specRef = useRef<Hemi | null>(null);
+  const menuRef = useRef(false);
+  const [conns, setConns] = useState<ConnectorMap | null>(null);
   const [open, setOpen] = useState<WinId[]>(initialOpen ? [initialOpen] : []);
   const pending = v.cards.filter(c => c.status === 'pending' || (c.kind === 'undo' && c.status === 'done'));
   const busy = v.state === 'pensando';
 
-  const toggle = (id: WinId) => setOpen(o => (o.includes(id) ? o.filter(x => x !== id) : [...o, id]));
+  const toggle = (id: WinId) => { setOpen(o => (o.includes(id) ? o.filter(x => x !== id) : [...o, id])); setMenuOpen(false); };
+  const goHome = () => { setOpen([]); setSpecialist(null); setMenuOpen(false); };
+  // Al abrir la tarjeta de un especialista se lee (solo lectura) el estado real de los conectores.
+  useEffect(() => {
+    if (!specialist && !open.includes('actividad')) return;
+    let alive = true;
+    api<{ connectors: ConnectorStatus[] }>('/api/connectors')
+      .then(r => { if (alive) setConns(Object.fromEntries(r.connectors.map(c => [c.id, c.state]))); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [specialist, open, connVer]);
   const close = (id: WinId) => setOpen(o => o.filter(x => x !== id));
   const show = (id: WinId) => setOpen(o => (o.includes(id) ? o : [...o, id]));
-  // Escape cierra la última tarjeta abierta.
+  specRef.current = specialist;
+  menuRef.current = menuOpen;
+  // Escape: con el menú móvil abierto cierra solo el menú; si no, la última tarjeta abierta.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) setOpen(o => o.slice(0, -1)); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) { if (menuRef.current) { setMenuOpen(false); return; } if (specRef.current) setSpecialist(null); else setOpen(o => o.slice(0, -1)); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const content: Record<WinId, ReactNode> = {
+    actividad: (
+      <div className="page" data-testid="actividad">
+        <h1>Actividad</h1>
+        <ul className="list">
+          {SECTIONS.map(s => (
+            <li key={s}><div className="main"><span className="t">{SECTION_LABEL[s].name}</span><span className="s">{SECTION_LABEL[s].role}</span></div>
+              <span className="badge" data-testid={`act-${s}`}>{specialistStatus(s, v.sections[s], conns)}</span></li>
+          ))}
+          <li><div className="main"><span className="t">Trabajos</span><span className="s">En segundo plano</span></div><span className="badge">{jobsActive ? `${jobsActive} en curso` : 'Ninguno en curso'}</span></li>
+        </ul>
+      </div>
+    ),
     clientes: <ClientsPanel refreshKey={refreshKey + connVer} goConnectors={() => show('conectores')} />,
     archivos: <DrivePanel refreshKey={refreshKey + connVer} goConnectors={() => show('conectores')} />,
     notion: <NotionPanel refreshKey={refreshKey + connVer} goConnectors={() => show('conectores')} />,
@@ -97,27 +131,26 @@ export function OrbScreen({ onActivity, notify, logout, refreshKey, jobs, jobsAc
   };
 
   return (
-    <main className="orbscreen" data-testid="orbscreen" data-open={open.join(' ')}>
+    <main className="orbscreen" data-testid="orbscreen" data-open={open.join(' ')} data-side={collapsed ? 'colapsada' : 'expandida'}>
       <div className="orb-corner tl">
         <img className="orb-logo" src="/logo-96.png" alt="" width={28} height={28} />
         <strong>NYVO</strong>
       </div>
-      <nav className="orb-dock" aria-label="Tarjetas">
-        {WINDOWS.map(w => (
-          <button key={w.id} type="button" className="orb-ctl" aria-pressed={open.includes(w.id)} onClick={() => toggle(w.id)}>
-            {w.label}{w.id === 'trabajos' && jobsActive ? <span className="orb-badge" aria-label={`${jobsActive} en curso`}>{jobsActive}</span> : null}
-          </button>
-        ))}
-      </nav>
+      <Sidebar open={open} collapsed={collapsed} setCollapsed={setCollapsed} menuOpen={menuOpen} setMenuOpen={setMenuOpen}
+        toggle={toggle} goHome={goHome} jobsActive={jobsActive} />
       <div className="orb-corner tr">
         <button type="button" className="orb-ctl" onClick={logout}>Salir</button>
       </div>
 
+      <div className="orb-wrap">
       <button type="button" className="orb-hit" onClick={v.toggle} disabled={!v.sttReady && !v.live}
-        aria-pressed={v.live} aria-label={v.live ? 'Detener la conversación por voz' : 'Hablar con Nyvo'}
+        aria-pressed={v.live} aria-label="Hablar con Nyvo"
         title={v.sttReady ? '' : 'Falta configurar la transcripción de voz (GROQ_API_KEY). Puedes escribirle con el teclado.'}>
         <Orb state={v.state} sections={v.sections} getLevel={v.getLevel} />
       </button>
+        <OrbLabels sections={v.sections} selected={specialist} onSelect={h => setSpecialist(sp => (sp === h ? null : h))} />
+      </div>
+      {specialist && <SpecialistCard id={specialist} mode={v.sections[specialist]} conns={conns} onClose={() => setSpecialist(null)} />}
 
       {open.length > 0 && <div className="orb-wins-layer">{column('izq')}{column('der')}</div>}
 
