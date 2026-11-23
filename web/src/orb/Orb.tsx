@@ -56,12 +56,24 @@ export function Orb({ state, sections, getLevel }: Props) {
     <div className="orb-stage" data-testid="orb" data-state={state} data-active={active.join(' ')} role="img"
       aria-label={`Orbe de Nyvo: ${STATE_TEXT[state]}${active.length ? `. Trabajando: ${active.map(s => SECTION_LABEL[s].name).join(', ')}` : ''}`}>
       <canvas ref={canvas} className="orb-canvas" data-testid="orb-canvas" />
+    </div>
+  );
+}
+
+const MODE_TEXT: Record<SectionMode, string> = { reposo: 'Disponible', activo: 'Trabajando', listo: 'Listo' };
+
+/** Los cuatro nombres del orbe como botones (fuera del botón de voz): abren la tarjeta del especialista, sin ejecutar nada. */
+export function OrbLabels({ sections, selected, onSelect }: { sections: Record<Hemi, SectionMode>; selected: Hemi | null; onSelect: (s: Hemi) => void }) {
+  return (
+    <div className="orb-labels">
       {SECTIONS.map(s => {
         const [r, g, b] = SECTION_RGB[s];
         return (
-          <div key={s} className={`orb-label ${s}`} data-testid={`sec-${s}`} data-mode={sections[s]} style={{ '--tint': `${r}, ${g}, ${b}` } as React.CSSProperties}>
+          <button key={s} type="button" className={`orb-label ${s}`} data-testid={`sec-${s}`} data-mode={sections[s]}
+            aria-pressed={selected === s} aria-label={`${SECTION_LABEL[s].name}: ${SECTION_LABEL[s].role}. ${MODE_TEXT[sections[s]]}. Ver tarjeta`}
+            onClick={() => onSelect(s)} style={{ '--tint': `${r}, ${g}, ${b}` } as React.CSSProperties}>
             <b>{SECTION_LABEL[s].name}</b><span>{SECTION_LABEL[s].role}</span>
-          </div>
+          </button>
         );
       })}
     </div>

@@ -16,10 +16,17 @@ async function loginOrb(page: Page, base = '') {
   await expect(page.getByTestId('orbscreen')).toBeVisible();
 }
 
-/** Abre tarjetas flotantes sobre el orbe desde la barra superior (cada botón abre o cierra la suya). */
+/** Botón de la barra lateral; en móvil abre antes el menú desplegable si está cerrado. */
+async function navButton(page: Page, name: string) {
+  const menu = page.getByRole('button', { name: 'Menú', exact: true });
+  if ((await menu.isVisible()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+  return page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name, exact: true });
+}
+
+/** Abre tarjetas flotantes sobre el orbe desde la barra lateral (cada botón abre o cierra la suya). */
 async function openCards(page: Page, ...names: string[]) {
   for (const n of names) {
-    const b = page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: n, exact: true });
+    const b = await navButton(page, n);
     if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
   }
 }
@@ -361,7 +368,7 @@ test('móvil: el HUD cabe sin desplazamiento horizontal @movil', async ({ page }
 test('estados hover y foco: pestañas, botones y filas responden al puntero y al teclado', async ({ page }) => {
   await login(page);
   const bg = (loc: ReturnType<Page['locator']>) => loc.evaluate(el => getComputedStyle(el).backgroundColor);
-  const tab = page.getByRole('navigation', { name: 'Tarjetas' }).getByRole('button', { name: 'Memoria', exact: true });
+  const tab = await navButton(page, 'Memoria');
   const before = await bg(tab);
   await tab.hover();
   await expect.poll(() => bg(tab)).not.toBe(before);
