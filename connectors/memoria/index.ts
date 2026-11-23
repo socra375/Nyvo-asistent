@@ -1,5 +1,5 @@
 import type { Connector, Tool } from '../types.js';
-import { addNote, looksLikeInstruction, relevantNotes } from '../../server/memory/memory.js';
+import { addNote, escapeAngles, looksLikeInstruction, NOTES_WARNING, relevantNotes } from '../../server/memory/memory.js';
 
 /** Memoria interna de Nyvo (base de datos propia): no cambia datos externos, no pide tarjeta. */
 const tools: Tool[] = [
@@ -22,7 +22,10 @@ const tools: Tool[] = [
     description: 'Busca en la memoria interna de Nyvo notas relacionadas con un tema.',
     parameters: { type: 'object', properties: { tema: { type: 'string' } }, required: ['tema'] },
     mutates: false,
-    run: async (a, ctx) => (await relevantNotes(ctx.deps.db, ctx.userId, String(a.tema ?? ''), 8)).map(n => ({ nota: n.content, etiquetas: n.tags }))
+    run: async (a, ctx) => ({
+      aviso: NOTES_WARNING,
+      notas: (await relevantNotes(ctx.deps.db, ctx.userId, String(a.tema ?? ''), 8)).map(n => ({ nota: escapeAngles(n.content), etiquetas: n.tags.map(escapeAngles) }))
+    })
   }
 ];
 
