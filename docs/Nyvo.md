@@ -116,6 +116,14 @@ En esta sesión, en local, con Postgres 16 real:
   - El botón «Detener grabación» latía con escala y no se podía pulsar con precisión.
   - El selector de conversaciones tenía un nombre accesible repetido.
 
+## Cortesía vacía como respuesta («De nada, ¿en qué más puedo ayudarte?»)
+
+- Causa: «que debo cobrar a cada cliente» salía de la ruta rápida porque `cobrar` figuraba entre los verbos que cambian datos; el modelo principal contestaba solo con cortesía, sin delegar, y `main.ts` la aceptaba.
+- `fastRoute` neutraliza las formas de consulta («debo cobrar», «por cobrar», «cuánto me deben»); las órdenes («cobra a Laura») siguen por el camino completo.
+- `server/agents/ordenes.ts`: si el mensaje no es social (`isSocial`: gracias, saludo, adiós, ok) y la respuesta es solo cortesía (`isCourtesyOnly`), se avisa al modelo UNA vez. Si insiste, se consulta directo al especialista del tema (`topicOf`) o, sin tema, se pregunta algo concreto. «Gracias» → «De nada» no se toca.
+- Una orden breve («trabaja», «sigue») lleva al modelo una nota de contexto; el mensaje guardado no cambia.
+- No probado con el modelo real de Gemini, solo con modelo guionizado.
+
 ## Lo que NO se pudo probar (y por qué)
 
 | Qué | Motivo |
